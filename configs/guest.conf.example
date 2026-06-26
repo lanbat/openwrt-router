@@ -2,16 +2,19 @@
 #   sh install.sh configs/guest.conf
 # configs/*.conf is gitignored and never committed.
 
-WIFI_KEY=                  # min 8 chars
+WIFI_KEY=                        # min 8 chars
 
 IFACE=guest
-RADIO=radio0               # radio0 = 2.4GHz, radio1 = 5GHz
-WIFI_UCI=guest             # UCI wireless section (created automatically if absent)
-SSID=                      # your guest network name
-ENCRYPTION=sae             # WPA3 only
+RADIO=radio0                     # radio0 = 2.4GHz, radio1 = 5GHz
+RADIO_EXTRA=                     # second radio for dual-band (e.g. radio1); leave blank for single-band
+WIFI_UCI=guest                   # UCI wireless section (created automatically if absent)
+SSID=                            # your guest network name
+ENCRYPTION=sae                   # WPA3 only; use sae-mixed for WPA3+WPA2 fallback
 
-SUBNET=192.168.3           # router gets .1, clients .100–.249
-RATE_LIMIT=10mbit          # 0 to disable
-DNS_SERVER=1.1.1.3         # Cloudflare for Families; use 1.1.1.1 for no filtering
-ALLOWLIST=no               # open to any device
-LAN_ACCESS=no             # yes = LAN devices can reach guests (but not vice versa)
+SUBNET=192.168.3                 # router gets .1, clients .100–.249
+RATE_LIMIT=10mbit                # aggregate cap for the whole network; 0 to disable
+RATE_LIMIT_PER_DEVICE=5mbit      # per-device cap so one device can't hog the shared limit
+DNS_SERVER=1.1.1.3               # Cloudflare for Families; use 1.1.1.1 for no filtering
+IPV6=no                          # yes to enable IPv6 (DHCPv6 + RA); DNS_SERVER_V6 auto-derived
+LAN_ACCESS=no                    # yes = LAN devices can reach guest devices (not vice versa)
+ALLOWLIST=no                     # open to any device

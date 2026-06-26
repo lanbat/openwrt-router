@@ -2,16 +2,19 @@
 #   sh install.sh configs/untrusted.conf
 # configs/*.conf is gitignored and never committed.
 
-WIFI_KEY=                  # min 8 chars
+WIFI_KEY=                        # min 8 chars
 
 IFACE=untrusted
-RADIO=radio0               # radio0 = 2.4GHz, radio1 = 5GHz
-WIFI_UCI=nestsetup         # UCI wireless section (run: uci show wireless)
+RADIO=radio0                     # radio0 = 2.4GHz, radio1 = 5GHz
+RADIO_EXTRA=                     # second radio for dual-band (e.g. radio1); leave blank for single-band
+WIFI_UCI=nestsetup               # UCI wireless section (run: uci show wireless)
 SSID=BTHub6-3K7P
-ENCRYPTION=psk+psk2        # WPA/WPA2 mixed — required for legacy devices
+ENCRYPTION=psk+psk2              # WPA/WPA2 mixed — required for legacy devices
 
-SUBNET=192.168.2           # router gets .1, clients .100–.249
-RATE_LIMIT=500kbit         # 0 to disable; supports mbit and kbit
-DNS_SERVER=1.1.1.3         # Cloudflare for Families (blocks malware + adult content)
-ALLOWLIST=yes              # only listed MACs get internet; see /etc/untrusted-allowed-macs
-LAN_ACCESS=yes            # yes = LAN devices can reach untrusted devices (but not vice versa)
+SUBNET=192.168.2                 # router gets .1, clients .100–.249
+RATE_LIMIT=500kbit               # aggregate cap for the whole network; 0 to disable
+RATE_LIMIT_PER_DEVICE=           # per-device cap (e.g. 250kbit); leave blank to disable
+DNS_SERVER=1.1.1.3               # Cloudflare for Families (blocks malware + adult content)
+IPV6=no                          # yes to enable IPv6 (DHCPv6 + RA); DNS_SERVER_V6 auto-derived
+LAN_ACCESS=yes                   # yes = LAN devices can reach untrusted devices (not vice versa)
+ALLOWLIST=yes                    # only listed MACs get internet; see /etc/untrusted-allowed-macs

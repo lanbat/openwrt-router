@@ -13,10 +13,13 @@ CONFIG="$1"
 [ ${#WIFI_KEY} -lt 8 ] && { echo "ERROR: WIFI_KEY must be at least 8 characters"; exit 1; }
 
 RADIO="${RADIO:-radio0}"
+RADIO_EXTRA="${RADIO_EXTRA:-}"
 ENCRYPTION="${ENCRYPTION:-psk2+psk3}"
 ALLOWLIST="${ALLOWLIST:-no}"
 RATE_LIMIT="${RATE_LIMIT:-0}"
+RATE_LIMIT_PER_DEVICE="${RATE_LIMIT_PER_DEVICE:-0}"
 DNS_SERVER="${DNS_SERVER:-1.1.1.3}"
+IPV6="${IPV6:-no}"
 WIFI_UCI="${WIFI_UCI:-$IFACE}"
 LAN_ACCESS="${LAN_ACCESS:-no}"
 
@@ -35,6 +38,12 @@ uci set network."$IFACE".device="br-${IFACE}"
 uci set network."$IFACE".ipaddr="${SUBNET}.1"
 uci set network."$IFACE".netmask=255.255.255.0
 
+if [ "$IPV6" = yes ]; then
+    uci set network."$IFACE".ip6assign=60
+else
+    uci -q delete network."$IFACE".ip6assign || true
+fi
+
 uci commit network
 
 # ── dhcp ─────────────────────────────────────────────────────────────────────
@@ -46,8 +55,23 @@ uci set dhcp."$IFACE".start=100
 uci set dhcp."$IFACE".limit=150
 uci set dhcp."$IFACE".leasetime=12h
 # Give clients the filtered DNS server directly — they never talk to the router's dnsmasq.
-uci -q delete dhcp."$IFACE".dhcp_option || true
 uci add_list dhcp."$IFACE".dhcp_option="6,$DNS_SERVER"
+
+if [ "$IPV6" = yes ]; then
+    uci set dhcp."$IFACE".dhcpv6=server
+    uci set dhcp."$IFACE".ra=server
+    # Derive IPv6 DNS from DNS_SERVER if not explicitly set.
+    if [ -z "${DNS_SERVER_V6:-}" ]; then
+        case "$DNS_SERVER" in
+            1.1.1.3) DNS_SERVER_V6=2606:4700:4700::1113 ;;
+            1.0.0.3) DNS_SERVER_V6=2606:4700:4700::1003 ;;
+            1.1.1.1) DNS_SERVER_V6=2606:4700:4700::1111 ;;
+            1.0.0.1) DNS_SERVER_V6=2606:4700:4700::1001 ;;
+            8.8.8.8) DNS_SERVER_V6=2001:4860:4860::8888 ;;
+            *)       DNS_SERVER_V6= ;;
+        esac
+    fi
+fi
 
 uci commit dhcp
 
@@ -61,6 +85,7 @@ uci set firewall."${IFACE}_zone".input=REJECT
 uci set firewall."${IFACE}_zone".output=ACCEPT
 uci set firewall."${IFACE}_zone".forward=REJECT
 
+# Allow DHCP (and DHCPv6 if IPv6 enabled).
 uci -q delete firewall."${IFACE}_dhcp" || true
 uci set firewall."${IFACE}_dhcp"=rule
 uci set firewall."${IFACE}_dhcp".name="Allow-DHCP-${IFACE}"
@@ -69,12 +94,25 @@ uci set firewall."${IFACE}_dhcp".proto=udp
 uci set firewall."${IFACE}_dhcp".dest_port=67
 uci set firewall."${IFACE}_dhcp".target=ACCEPT
 
+if [ "$IPV6" = yes ]; then
+    uci -q delete firewall."${IFACE}_dhcp6" || true
+    uci set firewall."${IFACE}_dhcp6"=rule
+    uci set firewall."${IFACE}_dhcp6".name="Allow-DHCPv6-${IFACE}"
+    uci set firewall."${IFACE}_dhcp6".src="$IFACE"
+    uci set firewall."${IFACE}_dhcp6".proto=udp
+    uci set firewall."${IFACE}_dhcp6".src_ip=fe80::/10
+    uci set firewall."${IFACE}_dhcp6".dest_ip=fe80::/10
+    uci set firewall."${IFACE}_dhcp6".dest_port=547
+    uci set firewall."${IFACE}_dhcp6".target=ACCEPT
+fi
+
+# Forward to WAN (internet access).
 uci -q delete firewall."${IFACE}_wan" || true
 uci set firewall."${IFACE}_wan"=forwarding
 uci set firewall."${IFACE}_wan".src="$IFACE"
 uci set firewall."${IFACE}_wan".dest=wan
 
-# Block DNS bypass — clients must use the DHCP-assigned DNS server.
+# Block DNS bypass — clients must use the DHCP-assigned server.
 uci -q delete firewall."${IFACE}_dns_block" || true
 uci set firewall."${IFACE}_dns_block"=rule
 uci set firewall."${IFACE}_dns_block".name="Block-DNS-bypass-${IFACE}"
@@ -85,9 +123,19 @@ uci set firewall."${IFACE}_dns_block".proto="tcp udp"
 uci set firewall."${IFACE}_dns_block".dest_port=53
 uci set firewall."${IFACE}_dns_block".target=REJECT
 
-# Allow LAN devices to initiate connections to this network's devices.
-# Response traffic is automatically allowed back by stateful tracking.
-# Guest devices still cannot reach LAN regardless of this setting.
+if [ "$IPV6" = yes ] && [ -n "${DNS_SERVER_V6:-}" ]; then
+    uci -q delete firewall."${IFACE}_dns_block6" || true
+    uci set firewall."${IFACE}_dns_block6"=rule
+    uci set firewall."${IFACE}_dns_block6".name="Block-DNS6-bypass-${IFACE}"
+    uci set firewall."${IFACE}_dns_block6".src="$IFACE"
+    uci set firewall."${IFACE}_dns_block6".dest=wan
+    uci set firewall."${IFACE}_dns_block6".dest_ip="!$DNS_SERVER_V6"
+    uci set firewall."${IFACE}_dns_block6".proto="tcp udp"
+    uci set firewall."${IFACE}_dns_block6".dest_port=53
+    uci set firewall."${IFACE}_dns_block6".target=REJECT
+fi
+
+# LAN → isolated network (optional, never the reverse).
 uci -q delete firewall."lan_${IFACE}" || true
 if [ "${LAN_ACCESS:-no}" = yes ]; then
     uci set firewall."lan_${IFACE}"=forwarding
@@ -99,49 +147,74 @@ uci commit firewall
 
 # ── wireless ──────────────────────────────────────────────────────────────────
 
-# Create the wifi-iface section if it doesn't exist yet.
-if ! uci -q get wireless."$WIFI_UCI" >/dev/null 2>&1; then
-    uci set wireless."$WIFI_UCI"=wifi-iface
-    uci set wireless."$WIFI_UCI".device="$RADIO"
-    uci set wireless."$WIFI_UCI".mode=ap
+_setup_wifi() {
+    _uci="$1"; _radio="$2"
+    if ! uci -q get wireless."$_uci" >/dev/null 2>&1; then
+        uci set wireless."$_uci"=wifi-iface
+        uci set wireless."$_uci".device="$_radio"
+        uci set wireless."$_uci".mode=ap
+    fi
+    uci set wireless."$_uci".ssid="$SSID"
+    uci set wireless."$_uci".key="$WIFI_KEY"
+    uci set wireless."$_uci".encryption="$ENCRYPTION"
+    uci set wireless."$_uci".network="$IFACE"
+    uci set wireless."$_uci".disabled=0
+}
+
+_setup_wifi "$WIFI_UCI" "$RADIO"
+
+if [ -n "$RADIO_EXTRA" ]; then
+    _setup_wifi "${WIFI_UCI}_extra" "$RADIO_EXTRA"
+else
+    # Clean up extra radio section if RADIO_EXTRA was removed from config.
+    uci -q delete wireless."${WIFI_UCI}_extra" || true
 fi
-uci set wireless."$WIFI_UCI".ssid="$SSID"
-uci set wireless."$WIFI_UCI".key="$WIFI_KEY"
-uci set wireless."$WIFI_UCI".encryption="$ENCRYPTION"
-uci set wireless."$WIFI_UCI".network="$IFACE"
-uci set wireless."$WIFI_UCI".disabled=0
 
 uci commit wireless
 
 # ── rate limiting via nftables ────────────────────────────────────────────────
 # tc tbf requires kmod-sched-core which is not packaged for this platform.
-# nft limit rate drops excess packets instead of queuing — acceptable for IoT/guest.
+# nft limit rate drops excess packets — acceptable for IoT/guest traffic.
 
 mkdir -p /etc/nftables.d
 
-if [ "${RATE_LIMIT:-0}" != "0" ]; then
-    case "$RATE_LIMIT" in
-        *[Mm]bit) _rate_kbytes=$(( $(echo "$RATE_LIMIT" | sed 's/[Mm]bit$//') * 125 )) ;;
-        *[Kk]bit) _rate_kbytes=$(( $(echo "$RATE_LIMIT" | sed 's/[Kk]bit$//') / 8 )) ;;
-        *) echo "ERROR: RATE_LIMIT must be in mbit or kbit (e.g. 1mbit, 500kbit)"; exit 1 ;;
+_parse_rate() {
+    case "$1" in
+        *[Mm]bit) echo $(( $(echo "$1" | sed 's/[Mm]bit$//') * 125 )) ;;
+        *[Kk]bit) echo $(( $(echo "$1" | sed 's/[Kk]bit$//') / 8 )) ;;
+        *) echo "ERROR: rate must be mbit or kbit (e.g. 1mbit, 500kbit)" >&2; exit 1 ;;
     esac
-    # Files in /etc/nftables.d/ are included inside table inet fw4 by fw4.
-    cat >/etc/nftables.d/20-${IFACE}-ratelimit.nft <<EOF
-chain ${IFACE}_ratelimit {
-    type filter hook forward priority 1; policy accept;
-    iifname "br-${IFACE}" limit rate over ${_rate_kbytes} kbytes/second drop
-    oifname "br-${IFACE}" limit rate over ${_rate_kbytes} kbytes/second drop
 }
-EOF
+
+_agg=0
+_per=0
+[ "${RATE_LIMIT:-0}"            != "0" ] && _agg=$(_parse_rate "$RATE_LIMIT")
+[ "${RATE_LIMIT_PER_DEVICE:-0}" != "0" ] && _per=$(_parse_rate "$RATE_LIMIT_PER_DEVICE")
+
+if [ "$_agg" -gt 0 ] || [ "$_per" -gt 0 ]; then
+    # Files in /etc/nftables.d/ are included inside table inet fw4 by fw4.
+    {
+        echo "chain ${IFACE}_ratelimit {"
+        echo "    type filter hook forward priority 1; policy accept;"
+        if [ "$_per" -gt 0 ]; then
+            echo "    iifname \"br-${IFACE}\" meter ${IFACE}_per_src { ip saddr limit rate over ${_per} kbytes/second } drop"
+            echo "    oifname \"br-${IFACE}\" meter ${IFACE}_per_dst { ip daddr limit rate over ${_per} kbytes/second } drop"
+        fi
+        if [ "$_agg" -gt 0 ]; then
+            echo "    iifname \"br-${IFACE}\" limit rate over ${_agg} kbytes/second drop"
+            echo "    oifname \"br-${IFACE}\" limit rate over ${_agg} kbytes/second drop"
+        fi
+        echo "}"
+    } >/etc/nftables.d/20-${IFACE}-ratelimit.nft
 else
     rm -f /etc/nftables.d/20-${IFACE}-ratelimit.nft
 fi
 
 # ── device allowlist (MAC → IP) ───────────────────────────────────────────────
-# Bridge-family nftables is unavailable on this platform (kmod not compiled in),
-# so MAC filtering is done in two layers:
-#   1. dnsmasq denies DHCP leases to unlisted MACs
-#   2. nft blocks forwarding from any IP not assigned to an allowed MAC
+# Bridge-family nftables is unavailable on this platform (kmod not compiled in).
+# Two-layer approach:
+#   1. dnsmasq ignores DHCP requests from unlisted MACs
+#   2. nft drops forwarding from any IP not assigned to a listed MAC
 
 if [ "${ALLOWLIST:-no}" = yes ]; then
     MAC_FILE=/etc/${IFACE}-allowed-macs
@@ -209,9 +282,15 @@ wifi reload
 
 echo "Installed: $IFACE"
 echo "  Network:   ${SUBNET}.1/24, DHCP ${SUBNET}.100–${SUBNET}.249"
-echo "  DNS:       $DNS_SERVER (bypass blocked)"
-echo "  Wireless:  $SSID ($ENCRYPTION on $RADIO)"
-echo "  Rate:      ${RATE_LIMIT:-none}"
+if [ "$IPV6" = yes ]; then
+    echo "  IPv6:      enabled (ip6assign /60, DHCPv6 + RA)"
+fi
+echo "  DNS:       $DNS_SERVER$([ "$IPV6" = yes ] && [ -n "${DNS_SERVER_V6:-}" ] && echo " / $DNS_SERVER_V6") (bypass blocked)"
+_radios="$RADIO$([ -n "$RADIO_EXTRA" ] && echo " + $RADIO_EXTRA")"
+echo "  Wireless:  $SSID ($ENCRYPTION on $_radios)"
+[ "$_agg" -gt 0 ] && echo "  Rate:      $RATE_LIMIT aggregate"
+[ "$_per" -gt 0 ] && echo "  Rate:      $RATE_LIMIT_PER_DEVICE per device"
+[ "$_agg" -eq 0 ] && [ "$_per" -eq 0 ] && echo "  Rate:      none"
 if [ "${LAN_ACCESS:-no}" = yes ]; then
     echo "  Firewall:  ${IFACE}→WAN yes  |  ${IFACE}→LAN no  |  LAN→${IFACE} yes"
 else
