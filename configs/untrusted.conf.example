@@ -1,0 +1,16 @@
+# Copy to configs/untrusted.conf and set WIFI_KEY before running:
+#   sh install.sh configs/untrusted.conf
+# configs/*.conf is gitignored and never committed.
+
+WIFI_KEY=                  # min 8 chars
+
+IFACE=untrusted
+RADIO=radio0               # radio0 = 2.4GHz, radio1 = 5GHz
+WIFI_UCI=nestsetup         # UCI wireless section (run: uci show wireless)
+SSID=BTHub6-3K7P
+ENCRYPTION=psk+psk2        # WPA/WPA2 mixed — required for legacy devices
+
+SUBNET=192.168.2           # router gets .1, clients .100–.249
+RATE_LIMIT=1mbit           # 0 to disable
+DNS_SERVER=1.1.1.3         # Cloudflare for Families (blocks malware + adult content)
+ALLOWLIST=yes              # only listed MACs get internet; see /etc/untrusted-allowed-macs
