@@ -18,6 +18,7 @@ ALLOWLIST="${ALLOWLIST:-no}"
 RATE_LIMIT="${RATE_LIMIT:-0}"
 DNS_SERVER="${DNS_SERVER:-1.1.1.3}"
 WIFI_UCI="${WIFI_UCI:-$IFACE}"
+LAN_ACCESS="${LAN_ACCESS:-no}"
 
 # ── network ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,16 @@ uci set firewall."${IFACE}_dns_block".dest_ip="!$DNS_SERVER"
 uci set firewall."${IFACE}_dns_block".proto="tcp udp"
 uci set firewall."${IFACE}_dns_block".dest_port=53
 uci set firewall."${IFACE}_dns_block".target=REJECT
+
+# Allow LAN devices to initiate connections to this network's devices.
+# Response traffic is automatically allowed back by stateful tracking.
+# Guest devices still cannot reach LAN regardless of this setting.
+uci -q delete firewall."lan_${IFACE}" || true
+if [ "${LAN_ACCESS:-no}" = yes ]; then
+    uci set firewall."lan_${IFACE}"=forwarding
+    uci set firewall."lan_${IFACE}".src=lan
+    uci set firewall."lan_${IFACE}".dest="$IFACE"
+fi
 
 uci commit firewall
 
@@ -201,7 +212,11 @@ echo "  Network:   ${SUBNET}.1/24, DHCP ${SUBNET}.100–${SUBNET}.249"
 echo "  DNS:       $DNS_SERVER (bypass blocked)"
 echo "  Wireless:  $SSID ($ENCRYPTION on $RADIO)"
 echo "  Rate:      ${RATE_LIMIT:-none}"
-echo "  Firewall:  ${IFACE}→WAN yes  |  ${IFACE}→LAN no  |  ${IFACE}→router no"
+if [ "${LAN_ACCESS:-no}" = yes ]; then
+    echo "  Firewall:  ${IFACE}→WAN yes  |  ${IFACE}→LAN no  |  LAN→${IFACE} yes"
+else
+    echo "  Firewall:  ${IFACE}→WAN yes  |  ${IFACE}→LAN no  |  LAN→${IFACE} no"
+fi
 if [ "${ALLOWLIST:-no}" = yes ]; then
     echo "  Allowlist: /etc/${IFACE}-allowed-macs"
     echo "             edit then run: ACTION=ifup INTERFACE=${IFACE} sh /etc/hotplug.d/iface/51-${IFACE}-macfilter"

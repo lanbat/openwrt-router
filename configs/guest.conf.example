@@ -14,3 +14,4 @@ SUBNET=192.168.3           # router gets .1, clients .100–.249
 RATE_LIMIT=10mbit          # 0 to disable
 DNS_SERVER=1.1.1.3         # Cloudflare for Families; use 1.1.1.1 for no filtering
 ALLOWLIST=no               # open to any device
+LAN_ACCESS=no             # yes = LAN devices can reach guests (but not vice versa)

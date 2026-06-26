@@ -14,3 +14,4 @@ SUBNET=192.168.2           # router gets .1, clients .100–.249
 RATE_LIMIT=500kbit         # 0 to disable; supports mbit and kbit
 DNS_SERVER=1.1.1.3         # Cloudflare for Families (blocks malware + adult content)
 ALLOWLIST=yes              # only listed MACs get internet; see /etc/untrusted-allowed-macs
+LAN_ACCESS=yes            # yes = LAN devices can reach untrusted devices (but not vice versa)
