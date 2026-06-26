@@ -65,7 +65,7 @@ Config files live in `configs/` and are gitignored — they never leave the rout
 | `IFACE` | yes | — | UCI interface name — must be unique (e.g. `guest`, `untrusted`) |
 | `SSID` | yes | — | WiFi network name |
 | `RADIO` | no | `radio0` | `radio0` = 2.4GHz, `radio1` = 5GHz |
-| `WIFI_UCI` | no | `$IFACE` | UCI wireless section name — created automatically if absent |
+| `WIFI_UCI` | no | `$IFACE` | Internal OpenWrt name for the wireless section — only set this if a section already exists on the router with a different name (e.g. `nestsetup`); omit for new networks |
 | `ENCRYPTION` | no | `psk2+psk3` | `sae` = WPA3 only, `sae-mixed` = WPA3+WPA2, `psk+psk2` = WPA2+WPA (legacy) |
 | `SUBNET` | yes | — | First three octets — router gets `.1`, clients `.100`–`.249` (e.g. `192.168.3`) |
 | `RATE_LIMIT` | no | `0` | Bandwidth cap for the whole network — `10mbit`, `500kbit`, `0` to disable |

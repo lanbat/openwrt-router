@@ -7,7 +7,6 @@ WIFI_KEY=                        # min 8 chars
 IFACE=untrusted
 RADIO=radio0                     # radio0 = 2.4GHz, radio1 = 5GHz
 RADIO_EXTRA=                     # second radio for dual-band (e.g. radio1); leave blank for single-band
-WIFI_UCI=nestsetup               # UCI wireless section (run: uci show wireless)
 SSID=BTHub6-3K7P
 ENCRYPTION=psk+psk2              # WPA/WPA2 mixed — required for legacy devices
 

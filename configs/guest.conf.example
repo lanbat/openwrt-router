@@ -7,7 +7,6 @@ WIFI_KEY=                        # min 8 chars
 IFACE=guest
 RADIO=radio0                     # radio0 = 2.4GHz, radio1 = 5GHz
 RADIO_EXTRA=                     # second radio for dual-band (e.g. radio1); leave blank for single-band
-WIFI_UCI=guest                   # UCI wireless section (created automatically if absent)
 SSID=                            # your guest network name
 ENCRYPTION=sae                   # WPA3 only; use sae-mixed for WPA3+WPA2 fallback
 
