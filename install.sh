@@ -412,7 +412,11 @@ echo "  Network:   ${SUBNET}.1/24, DHCP ${SUBNET}.100–${SUBNET}.249"
 if [ "$IPV6" = yes ]; then
     echo "  IPv6:      enabled (ip6assign /60, DHCPv6 + RA)"
 fi
-echo "  DNS:       $DNS_SERVER$([ "$IPV6" = yes ] && [ -n "${DNS_SERVER_V6:-}" ] && echo " / $DNS_SERVER_V6") (bypass blocked)"
+if [ "$DOT" = yes ]; then
+    echo "  DNS:       DoT via https-dns-proxy → ${DNS_SERVER}$([ "$IPV6" = yes ] && [ -n "${DNS_SERVER_V6:-}" ] && echo " / $DNS_SERVER_V6")"
+else
+    echo "  DNS:       ${DNS_SERVER}$([ "$IPV6" = yes ] && [ -n "${DNS_SERVER_V6:-}" ] && echo " / $DNS_SERVER_V6") direct (bypass blocked)"
+fi
 _radios="$RADIO$([ -n "$RADIO_EXTRA" ] && echo " + $RADIO_EXTRA")"
 echo "  Wireless:  $SSID ($ENCRYPTION on $_radios)"
 [ "$_agg" -gt 0 ] && echo "  Rate:      $RATE_LIMIT aggregate"
@@ -427,7 +431,6 @@ if [ "${ALLOWLIST:-no}" = yes ]; then
     echo "  Allowlist: /etc/${IFACE}-allowed-macs"
     echo "             edit then run: ACTION=ifup INTERFACE=${IFACE} sh /etc/hotplug.d/iface/51-${IFACE}-macfilter"
 fi
-echo "  DNS:       $([ "$DOT" = yes ] && echo "DoT via https-dns-proxy (${DNS_SERVER})" || echo "$DNS_SERVER direct") (bypass blocked)"
 [ "$ISOLATE" = yes ] && echo "  Isolate:   clients cannot reach each other"
 [ -n "$ALLOWED_PORTS" ] && echo "  Ports:     restricted to $ALLOWED_PORTS + NTP"
 [ -n "$NOTIFY_URL" ] && echo "  Notify:    new devices → ntfy"

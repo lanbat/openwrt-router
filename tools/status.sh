@@ -63,14 +63,15 @@ _zone_info() {
         fi
     fi
 
-    # Rate limit
-    rl=$(nft list chain inet fw4 "${iface}_ratelimit" 2>/dev/null \
-         | awk '/limit rate over/ { print $5, $6, $7; exit }')
-    [ -n "$rl" ] && printf '  Rate:     %s (aggregate)\n' "$rl"
+    # Rate limit — nft displays meter rules as "add @name { ... }" at list time
+    _rlt=$(nft list chain inet fw4 "${iface}_ratelimit" 2>/dev/null)
+    rl=$(echo "$_rlt" | awk '!/add @/ && /iifname.*limit rate over/ {
+             for(i=1;i<=NF;i++) if($i=="over") { print $(i+1), $(i+2); exit } }')
+    [ -n "$rl" ] && printf '  Rate:     over %s (aggregate)\n' "$rl"
 
-    prl=$(nft list chain inet fw4 "${iface}_ratelimit" 2>/dev/null \
-          | awk '/meter.*limit rate over/ { print $0 }' | grep -o 'limit rate over [0-9]* [a-z/]*' | head -1)
-    [ -n "$prl" ] && printf '  Rate:     %s (per device)\n' "$prl"
+    prl=$(echo "$_rlt" | awk '/add @.*limit rate over/ {
+              for(i=1;i<=NF;i++) if($i=="over") { print $(i+1), $(i+2); exit } }' | head -1)
+    [ -n "$prl" ] && printf '  Rate:     over %s (per device)\n' "$prl"
 
     # Traffic counters (since last fw4 reload)
     _ctr=$(nft list chain inet fw4 "${iface}_counter" 2>/dev/null)
