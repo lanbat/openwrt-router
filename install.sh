@@ -10,13 +10,18 @@ CONFIG="$SCRIPT_DIR/config"
 [ -z "${WIFI_KEY:-}" ] && { echo "ERROR: WIFI_KEY is not set in config"; exit 1; }
 [ ${#WIFI_KEY} -lt 8 ]  && { echo "ERROR: WIFI_KEY must be at least 8 characters"; exit 1; }
 
-HOTPLUG=/etc/hotplug.d/iface/50-untrusted-ratelimit
+# ── network ──────────────────────────────────────────────────────────────────
 
-# ── network ────────────────────────────────────────────────────────────────────
+# Explicit bridge device required for DSA — netifd won't auto-create one for WiFi-only networks.
+uci -q delete network."br_${IFACE}" || true
+uci set network."br_${IFACE}"=device
+uci set network."br_${IFACE}".name="br-${IFACE}"
+uci set network."br_${IFACE}".type=bridge
 
 uci -q delete network."$IFACE" || true
 uci set network."$IFACE"=interface
 uci set network."$IFACE".proto=static
+uci set network."$IFACE".device="br-${IFACE}"
 uci set network."$IFACE".ipaddr="${SUBNET}.1"
 uci set network."$IFACE".netmask=255.255.255.0
 
@@ -84,17 +89,23 @@ uci set wireless."$WIFI_UCI".disabled=0
 
 uci commit wireless
 
-# ── rate limiting hotplug ──────────────────────────────────────────────────────
+# ── rate limiting via nftables ─────────────────────────────────────────────────
+# tc tbf isn't available (kmod-sched-core not packaged); use nft drop instead.
+# Convert RATE_LIMIT (e.g. "1mbit") to kbytes/second for nft.
+# nft uses bytes/second: 1mbit = 125 kbytes/second.
+_rate_kbps=$(echo "$RATE_LIMIT" | sed 's/mbit$//; s/[Mm]bit$//' )
+_rate_kbytes=$(( _rate_kbps * 125 ))
 
-mkdir -p /etc/hotplug.d/iface
-cat >"$HOTPLUG" <<EOF
-#!/bin/sh
-[ "\$ACTION" = ifup ] || exit 0
-[ "\$INTERFACE" = "$IFACE" ] || exit 0
-tc qdisc del dev br-${IFACE} root 2>/dev/null || true
-tc qdisc add dev br-${IFACE} root tbf rate $RATE_LIMIT burst 32kbit latency 400ms
+NFT_RATE_SCRIPT=/etc/nftables.d/20-untrusted-ratelimit.nft
+mkdir -p /etc/nftables.d
+# Included inside table inet fw4 by fw4, so chain syntax (no 'add rule' prefix).
+cat >"$NFT_RATE_SCRIPT" <<EOF
+chain untrusted_ratelimit {
+    type filter hook forward priority 1; policy accept;
+    iifname "br-${IFACE}" limit rate over ${_rate_kbytes} kbytes/second drop
+    oifname "br-${IFACE}" limit rate over ${_rate_kbytes} kbytes/second drop
+}
 EOF
-chmod 0755 "$HOTPLUG"
 
 # ── apply ──────────────────────────────────────────────────────────────────────
 
@@ -103,15 +114,11 @@ chmod 0755 "$HOTPLUG"
 fw4 reload
 wifi reload
 
-# Apply rate limit immediately if the bridge already exists.
-tc qdisc del dev br-"$IFACE" root 2>/dev/null || true
-tc qdisc add dev br-"$IFACE" root tbf rate "$RATE_LIMIT" burst 32kbit latency 400ms 2>/dev/null || true
-
 # ── summary ────────────────────────────────────────────────────────────────────
 
 echo "Installed."
 echo "  Network:   $IFACE — ${SUBNET}.1/24, DHCP ${SUBNET}.100–${SUBNET}.249"
 echo "  DNS:       $DNS_SERVER (via DHCP option 6, bypass blocked)"
 echo "  Wireless:  $SSID on UCI '$WIFI_UCI' (WPA/WPA2, $IFACE bridge)"
-echo "  Rate:      $RATE_LIMIT download cap on br-${IFACE}"
+echo "  Rate:      $RATE_LIMIT cap (nft drop) on br-${IFACE}"
 echo "  Firewall:  ${IFACE}→WAN yes  |  ${IFACE}→LAN no  |  ${IFACE}→router no"
