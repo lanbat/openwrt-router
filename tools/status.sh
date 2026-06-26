@@ -24,15 +24,14 @@ _zone_info() {
         return
     fi
 
-    # WiFi
-    ssid=$(uci -q show wireless \
-           | awk -F= '/\.network='"'$iface'"'/ { sec=$1; sub(/\.network/,"",sec); print sec }' \
-           | head -1)
-    if [ -n "$ssid" ]; then
-        ssid_val=$(uci -q get wireless."$ssid".ssid 2>/dev/null || echo '?')
-        enc=$(uci -q get wireless."$ssid".encryption 2>/dev/null || echo '?')
-        printf '  WiFi:     %s  (%s, %s)\n' "$ssid_val" "$ssid" "$enc"
-    fi
+    # WiFi — find wireless sections pointing at this network
+    for wuci in $(uci show wireless 2>/dev/null \
+                  | awk -F= "/\\.network='?${iface}'?/ { gsub(/wireless\\./,\"\",\$1); gsub(/\\.network/,\"\",\$1); print \$1 }"); do
+        ssid_val=$(uci -q get wireless."$wuci".ssid 2>/dev/null || echo '?')
+        enc=$(uci -q get wireless."$wuci".encryption 2>/dev/null || echo '?')
+        radio=$(uci -q get wireless."$wuci".device 2>/dev/null || echo '?')
+        printf '  WiFi:     %-30s (%s, %s on %s)\n' "$ssid_val" "$wuci" "$enc" "$radio"
+    done
 
     # Connected clients
     clients=0
@@ -92,13 +91,13 @@ _zone_info() {
     fi
 }
 
-# Find all non-lan/wan firewall zones that we manage (have a matching bridge).
-zones=$(uci show firewall 2>/dev/null \
-        | awk -F= '/\.name=/ && !/wan|lan/ {
-            gsub(/firewall\.|\.name/,"",$1);
-            gsub(/'"'"'/,"",$2);
-            if ($2 != "wan" && $2 != "lan") print $2
-          }')
+# Find all non-lan/wan firewall zones (sections of type=zone only).
+zones=$(for s in $(uci show firewall 2>/dev/null \
+        | awk -F= '/=zone$/ { gsub(/firewall\./,"",$1); print $1 }'); do
+    name=$(uci -q get firewall."$s".name 2>/dev/null || true)
+    [ "$name" = lan ] || [ "$name" = wan ] && continue
+    [ -n "$name" ] && echo "$name"
+done)
 
 if [ -z "$zones" ]; then
     echo "No isolated networks found."
