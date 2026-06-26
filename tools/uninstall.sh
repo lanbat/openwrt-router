@@ -48,8 +48,9 @@ uci commit dhcp
 # ── firewall ──────────────────────────────────────────────────────────────────
 
 for section in \
-    "${IFACE}_zone" "${IFACE}_dhcp" "${IFACE}_wan" \
-    "${IFACE}_dns_block" "${IFACE}_dns_block6" "lan_${IFACE}"; do
+    "${IFACE}_zone" "${IFACE}_dhcp" "${IFACE}_dhcp6" "${IFACE}_wan" \
+    "${IFACE}_dns_block" "${IFACE}_dns_block6" \
+    "${IFACE}_dns_input" "${IFACE}_dot_block" "lan_${IFACE}"; do
     uci -q delete firewall."$section" 2>/dev/null && echo "  Removed firewall: $section"
 done
 
@@ -77,7 +78,10 @@ uci commit firewall
 
 for f in \
     /etc/nftables.d/20-${IFACE}-ratelimit.nft \
-    /etc/nftables.d/21-${IFACE}-allowlist.nft; do
+    /etc/nftables.d/21-${IFACE}-allowlist.nft \
+    /etc/nftables.d/22-${IFACE}-ports.nft \
+    /etc/nftables.d/24-${IFACE}-counter.nft \
+    /etc/nftables.d/30-${IFACE}-timeblock.nft; do
     [ -f "$f" ] && rm -f "$f" && echo "  Removed: $f"
 done
 
@@ -85,7 +89,10 @@ done
 
 rm -f /etc/hotplug.d/iface/51-${IFACE}-macfilter \
       /etc/dnsmasq.d/${IFACE}-macfilter.conf \
-    && echo "  Removed hotplug and dnsmasq macfilter files"
+      /etc/${IFACE}-notify.conf \
+      /www/net/${IFACE}.html
+( crontab -l 2>/dev/null | grep -v "# access-${IFACE}" ) | crontab - 2>/dev/null || true
+echo "  Removed hotplug, notify, schedule, and dnsmasq macfilter files"
 
 if [ "$PURGE" = yes ]; then
     rm -f /etc/${IFACE}-allowed-macs && echo "  Removed allowed-macs file (--purge)"

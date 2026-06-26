@@ -22,6 +22,11 @@ DNS_SERVER="${DNS_SERVER:-1.1.1.3}"
 IPV6="${IPV6:-no}"
 WIFI_UCI="${WIFI_UCI:-$IFACE}"
 LAN_ACCESS="${LAN_ACCESS:-no}"
+ISOLATE="${ISOLATE:-yes}"
+DOT="${DOT:-no}"
+ALLOWED_PORTS="${ALLOWED_PORTS:-}"
+NOTIFY_URL="${NOTIFY_URL:-}"
+MDNS="${MDNS:-no}"
 
 # ── network ──────────────────────────────────────────────────────────────────
 
@@ -54,8 +59,14 @@ uci set dhcp."$IFACE".interface="$IFACE"
 uci set dhcp."$IFACE".start=100
 uci set dhcp."$IFACE".limit=150
 uci set dhcp."$IFACE".leasetime=12h
-# Give clients the filtered DNS server directly — they never talk to the router's dnsmasq.
-uci add_list dhcp."$IFACE".dhcp_option="6,$DNS_SERVER"
+# DOT: give clients the router's bridge IP so queries go through dnsmasq → https-dns-proxy.
+# Otherwise hand the external DNS server directly so queries bypass the router.
+if [ "$DOT" = yes ]; then
+    _client_dns="${SUBNET}.1"
+else
+    _client_dns="$DNS_SERVER"
+fi
+uci add_list dhcp."$IFACE".dhcp_option="6,$_client_dns"
 
 if [ "$IPV6" = yes ]; then
     uci set dhcp."$IFACE".dhcpv6=server
@@ -112,16 +123,20 @@ uci set firewall."${IFACE}_wan"=forwarding
 uci set firewall."${IFACE}_wan".src="$IFACE"
 uci set firewall."${IFACE}_wan".dest=wan
 
-# Block DNS bypass — clients must use the DHCP-assigned server.
+# DNS bypass prevention — block all external port 53 forwarding.
+# When DOT=yes, clients query the router and all external DNS is blocked outright.
+# When DOT=no, only block DNS to servers other than the designated one.
 uci -q delete firewall."${IFACE}_dns_block" || true
 uci set firewall."${IFACE}_dns_block"=rule
 uci set firewall."${IFACE}_dns_block".name="Block-DNS-bypass-${IFACE}"
 uci set firewall."${IFACE}_dns_block".src="$IFACE"
 uci set firewall."${IFACE}_dns_block".dest=wan
-uci set firewall."${IFACE}_dns_block".dest_ip="!$DNS_SERVER"
 uci set firewall."${IFACE}_dns_block".proto="tcp udp"
 uci set firewall."${IFACE}_dns_block".dest_port=53
 uci set firewall."${IFACE}_dns_block".target=REJECT
+if [ "$DOT" != yes ]; then
+    uci set firewall."${IFACE}_dns_block".dest_ip="!$DNS_SERVER"
+fi
 
 if [ "$IPV6" = yes ] && [ -n "${DNS_SERVER_V6:-}" ]; then
     uci -q delete firewall."${IFACE}_dns_block6" || true
@@ -129,10 +144,30 @@ if [ "$IPV6" = yes ] && [ -n "${DNS_SERVER_V6:-}" ]; then
     uci set firewall."${IFACE}_dns_block6".name="Block-DNS6-bypass-${IFACE}"
     uci set firewall."${IFACE}_dns_block6".src="$IFACE"
     uci set firewall."${IFACE}_dns_block6".dest=wan
-    uci set firewall."${IFACE}_dns_block6".dest_ip="!$DNS_SERVER_V6"
     uci set firewall."${IFACE}_dns_block6".proto="tcp udp"
     uci set firewall."${IFACE}_dns_block6".dest_port=53
     uci set firewall."${IFACE}_dns_block6".target=REJECT
+    [ "$DOT" != yes ] && uci set firewall."${IFACE}_dns_block6".dest_ip="!$DNS_SERVER_V6"
+fi
+
+# DOT — allow DNS queries to the router's own IP; block DoT/DoH bypass.
+uci -q delete firewall."${IFACE}_dns_input" || true
+uci -q delete firewall."${IFACE}_dot_block" || true
+if [ "$DOT" = yes ]; then
+    uci set firewall."${IFACE}_dns_input"=rule
+    uci set firewall."${IFACE}_dns_input".name="Allow-DNS-Input-${IFACE}"
+    uci set firewall."${IFACE}_dns_input".src="$IFACE"
+    uci set firewall."${IFACE}_dns_input".proto="tcp udp"
+    uci set firewall."${IFACE}_dns_input".dest_port=53
+    uci set firewall."${IFACE}_dns_input".target=ACCEPT
+
+    uci set firewall."${IFACE}_dot_block"=rule
+    uci set firewall."${IFACE}_dot_block".name="Block-DoT-bypass-${IFACE}"
+    uci set firewall."${IFACE}_dot_block".src="$IFACE"
+    uci set firewall."${IFACE}_dot_block".dest=wan
+    uci set firewall."${IFACE}_dot_block".proto="tcp udp"
+    uci set firewall."${IFACE}_dot_block".dest_port=853
+    uci set firewall."${IFACE}_dot_block".target=REJECT
 fi
 
 # LAN → isolated network (optional, never the reverse).
@@ -159,6 +194,7 @@ _setup_wifi() {
     uci set wireless."$_uci".encryption="$ENCRYPTION"
     uci set wireless."$_uci".network="$IFACE"
     uci set wireless."$_uci".disabled=0
+    uci set wireless."$_uci".isolate=$([ "$ISOLATE" = yes ] && echo 1 || echo 0)
 }
 
 _setup_wifi "$WIFI_UCI" "$RADIO"
@@ -271,6 +307,97 @@ else
     rm -f /etc/dnsmasq.d/${IFACE}-macfilter.conf
 fi
 
+# ── port restriction ──────────────────────────────────────────────────────────
+
+rm -f /etc/nftables.d/22-${IFACE}-ports.nft
+if [ -n "$ALLOWED_PORTS" ]; then
+    _ports_nft=$(echo "$ALLOWED_PORTS" | tr ' ' '\n' | awk 'NR==1{p=$0} NR>1{p=p", "$0} END{print p}')
+    cat >/etc/nftables.d/22-${IFACE}-ports.nft <<EOF
+chain ${IFACE}_port_filter {
+    type filter hook forward priority -2; policy accept;
+    iifname "br-${IFACE}" udp dport 123 accept
+    iifname "br-${IFACE}" tcp dport { ${_ports_nft} } accept
+    iifname "br-${IFACE}" udp dport { ${_ports_nft} } accept
+    iifname "br-${IFACE}" drop
+}
+EOF
+fi
+
+# ── traffic counters ──────────────────────────────────────────────────────────
+# Always create — status.sh reads these to show bytes transferred since last fw4 reload.
+
+cat >/etc/nftables.d/24-${IFACE}-counter.nft <<EOF
+chain ${IFACE}_counter {
+    type filter hook forward priority 0; policy accept;
+    iifname "br-${IFACE}" counter
+    oifname "br-${IFACE}" counter
+}
+EOF
+
+# ── device notifications ───────────────────────────────────────────────────────
+# When NOTIFY_URL is set, dnsmasq calls /usr/sbin/dhcp-notify on each new lease.
+# ntfy.sh is the simplest backend: NOTIFY_URL=https://ntfy.sh/my-unique-topic
+
+if [ -n "$NOTIFY_URL" ]; then
+    printf 'SUBNET=%s\nNOTIFY_URL=%s\nIFACE_NAME=%s\n' \
+        "$SUBNET" "$NOTIFY_URL" "$IFACE" >/etc/${IFACE}-notify.conf
+
+    cat >/usr/sbin/dhcp-notify <<'NOTIFYEOF'
+#!/bin/sh
+[ "$1" = add ] || exit 0
+_mac="$2"; _ip="$3"; _host="${4:-unknown}"
+for _conf in /etc/*-notify.conf; do
+    [ -f "$_conf" ] || continue
+    unset SUBNET NOTIFY_URL IFACE_NAME
+    . "$_conf"
+    case "$_ip" in "$SUBNET".*) ;; *) continue ;; esac
+    curl -sf -X POST "$NOTIFY_URL" \
+        -H "Title: New device — $IFACE_NAME" \
+        -H "Priority: low" \
+        -d "${_host} (${_mac}) joined at ${_ip}" >/dev/null &
+done
+NOTIFYEOF
+    chmod 0755 /usr/sbin/dhcp-notify
+    uci set dhcp.@dnsmasq[0].dhcpscript=/usr/sbin/dhcp-notify
+    uci commit dhcp
+else
+    rm -f /etc/${IFACE}-notify.conf
+fi
+
+# ── mDNS reflection ───────────────────────────────────────────────────────────
+# Reflects mDNS (Bonjour/Avahi) between this network and LAN so guests can
+# discover shared services like Chromecast, AirPrint, or game lobbies.
+# Note: avahi reflects ALL mDNS services — no selective filtering.
+
+if [ "$MDNS" = yes ]; then
+    if ! command -v avahi-daemon >/dev/null 2>&1; then
+        apk add avahi-dbus-daemon >/dev/null
+    fi
+    mkdir -p /etc/avahi
+    # Gather all interfaces that already have mDNS enabled, plus this one.
+    _ifaces=br-lan
+    if [ -f /etc/avahi/avahi-daemon.conf ]; then
+        for _if in $(awk -F= '/^allow-interfaces/ { print $2 }' \
+                    /etc/avahi/avahi-daemon.conf | tr ',' ' '); do
+            case " $_ifaces " in *" $_if "*) ;; *) _ifaces="${_ifaces},${_if}" ;; esac
+        done
+    fi
+    case " $(echo $_ifaces | tr ',' ' ') " in
+        *" br-${IFACE} "*) ;;
+        *) _ifaces="${_ifaces},br-${IFACE}" ;;
+    esac
+    cat >/etc/avahi/avahi-daemon.conf <<AVAHIEOF
+[server]
+allow-interfaces=${_ifaces}
+
+[reflector]
+enable-reflector=yes
+reflect-ipv=no
+AVAHIEOF
+    /etc/init.d/avahi-daemon enable 2>/dev/null || true
+    /etc/init.d/avahi-daemon restart 2>/dev/null || true
+fi
+
 # ── apply ─────────────────────────────────────────────────────────────────────
 
 /etc/init.d/network reload
@@ -300,3 +427,8 @@ if [ "${ALLOWLIST:-no}" = yes ]; then
     echo "  Allowlist: /etc/${IFACE}-allowed-macs"
     echo "             edit then run: ACTION=ifup INTERFACE=${IFACE} sh /etc/hotplug.d/iface/51-${IFACE}-macfilter"
 fi
+echo "  DNS:       $([ "$DOT" = yes ] && echo "DoT via https-dns-proxy (${DNS_SERVER})" || echo "$DNS_SERVER direct") (bypass blocked)"
+[ "$ISOLATE" = yes ] && echo "  Isolate:   clients cannot reach each other"
+[ -n "$ALLOWED_PORTS" ] && echo "  Ports:     restricted to $ALLOWED_PORTS + NTP"
+[ -n "$NOTIFY_URL" ] && echo "  Notify:    new devices → ntfy"
+[ "$MDNS" = yes ] && echo "  mDNS:      reflecting between LAN and $IFACE"

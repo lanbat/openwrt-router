@@ -17,3 +17,10 @@ DNS_SERVER=1.1.1.3               # Cloudflare for Families; use 1.1.1.1 for no f
 IPV6=no                          # yes to enable IPv6 (DHCPv6 + RA); DNS_SERVER_V6 auto-derived
 LAN_ACCESS=no                    # yes = LAN devices can reach guest devices (not vice versa)
 ALLOWLIST=no                     # open to any device
+
+ISOLATE=yes                      # clients cannot talk to each other (recommended for guests)
+DOT=no                           # yes = DNS via https-dns-proxy (encrypted DoT/DoH); requires https-dns-proxy
+ALLOWED_PORTS=                   # restrict outbound ports e.g. "80 443"; blank = allow all
+NOTIFY_URL=                      # ntfy.sh URL for new device alerts e.g. https://ntfy.sh/my-topic
+MDNS=no                          # yes = reflect mDNS from LAN (enables casting, AirPrint, etc.)
+ACCESS_HOURS=                    # restrict internet to hours e.g. "8-23"; blank = always on (set via access-schedule.sh)

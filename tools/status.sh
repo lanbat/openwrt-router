@@ -72,6 +72,31 @@ _zone_info() {
           | awk '/meter.*limit rate over/ { print $0 }' | grep -o 'limit rate over [0-9]* [a-z/]*' | head -1)
     [ -n "$prl" ] && printf '  Rate:     %s (per device)\n' "$prl"
 
+    # Traffic counters (since last fw4 reload)
+    _ctr=$(nft list chain inet fw4 "${iface}_counter" 2>/dev/null)
+    if [ -n "$_ctr" ]; then
+        _up=$(echo "$_ctr" | awk "/iifname.*br-${iface}.*counter/ {
+            for(i=1;i<=NF;i++) if(\$i==\"bytes\") { b=\$(i+1); exit }
+            if(b>=1073741824) printf \"%.1f GB\", b/1073741824
+            else printf \"%.1f MB\", b/1048576
+        }")
+        _dn=$(echo "$_ctr" | awk "/oifname.*br-${iface}.*counter/ {
+            for(i=1;i<=NF;i++) if(\$i==\"bytes\") { b=\$(i+1); exit }
+            if(b>=1073741824) printf \"%.1f GB\", b/1073741824
+            else printf \"%.1f MB\", b/1048576
+        }")
+        printf '  Traffic:  ↑ %s  ↓ %s  (since fw4 reload)\n' "${_up:-0 B}" "${_dn:-0 B}"
+    fi
+
+    # Access schedule
+    if [ -f /etc/nftables.d/30-${iface}-timeblock.nft ]; then
+        printf '  Schedule: BLOCKED (internet off)\n'
+    else
+        sched=$(crontab -l 2>/dev/null | grep "# access-${iface}" | head -1 \
+                | awk '{print $2}')
+        [ -n "$sched" ] && printf '  Schedule: internet hours restricted (see access-schedule.sh)\n'
+    fi
+
     # Active port forwards
     fwds=$(uci show firewall 2>/dev/null \
            | awk -F= '/=redirect/ { sec=$1; sub(/=redirect/,"",sec); print sec }')

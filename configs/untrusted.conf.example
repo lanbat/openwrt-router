@@ -17,3 +17,9 @@ DNS_SERVER=1.1.1.3               # Cloudflare for Families (blocks malware + adu
 IPV6=no                          # yes to enable IPv6 (DHCPv6 + RA); DNS_SERVER_V6 auto-derived
 LAN_ACCESS=yes                   # yes = LAN devices can reach untrusted devices (not vice versa)
 ALLOWLIST=yes                    # only listed MACs get internet; see /etc/untrusted-allowed-macs
+
+ISOLATE=yes                      # clients cannot talk to each other
+DOT=no                           # yes = DNS via https-dns-proxy (encrypted DoT/DoH)
+ALLOWED_PORTS=                   # restrict outbound ports; blank = allow all
+NOTIFY_URL=                      # ntfy.sh URL for new device alerts
+MDNS=no                          # yes = reflect mDNS from LAN
