@@ -34,6 +34,10 @@ uci set wireless."$WIFI_UCI".key="$NEW_KEY"
 [ -n "${RADIO_EXTRA:-}" ] && uci -q get wireless."${WIFI_UCI}_extra" >/dev/null 2>&1 \
     && uci set wireless."${WIFI_UCI}_extra".key="$NEW_KEY"
 uci commit wireless
+
+# Clear join approvals — everyone re-connects with the new password and needs re-approval
+rm -f "/etc/extra-networks/${IFACE}-join-approved" "/etc/extra-networks/${IFACE}-join-pending"
+
 wifi reload
 
 printf '\nPassword rotated: %s (%s)\n' "$IFACE" "${SSID:-$IFACE}"

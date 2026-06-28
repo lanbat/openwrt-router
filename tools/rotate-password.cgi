@@ -54,6 +54,9 @@ uci -q get wireless."${_iface}_extra" >/dev/null 2>&1 \
     && uci set wireless."${_iface}_extra".key="$_newpw"
 uci commit wireless
 
+# Clear join approvals — everyone re-connects with the new password and needs re-approval
+rm -f "${BASE_DIR}/${_iface}-join-approved" "${BASE_DIR}/${_iface}-join-pending"
+
 # Update config file if it exists (keeps rotate-password.sh in sync)
 REPO_DIR=$(awk -F'=' '/^REPO_DIR/ { gsub(/[[:space:]]/, "", $2); print $2 }' "${BASE_DIR}/config" 2>/dev/null || true)
 _cfg="${REPO_DIR}/configs/${_iface}.conf"
