@@ -6,6 +6,16 @@ BASE_DIR=/etc/extra-networks
 
 _get_param() { printf '%s' "$1" | tr '&' '\n' | grep "^${2}=" | head -1 | sed "s/^${2}=//"; }
 _html()      { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'; }
+_urldecode() {
+    printf '%s' "$1" | sed 's/+/ /g' | awk '
+    BEGIN { for(i=0;i<256;i++) h[sprintf("%02X",i)]=h[sprintf("%02x",i)]=sprintf("%c",i) }
+    { s=$0; out=""
+      while(match(s,/%[0-9A-Fa-f][0-9A-Fa-f]/)) {
+        out=out substr(s,1,RSTART-1) h[substr(s,RSTART+1,2)]
+        s=substr(s,RSTART+RLENGTH)
+      }
+      print out s }'
+}
 _valid_ip()  {
     case "$1" in
         *.*.*.*)  printf '%s' "$1" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' ;;
@@ -39,8 +49,8 @@ else
     _params="${QUERY_STRING:-}"
 fi
 
-NET=$(_get_param "$_params" net)
-MAC=$(_get_param "$_params" mac | tr 'ABCDEF' 'abcdef')
+NET=$(_urldecode "$(_get_param "$_params" net)")
+MAC=$(_urldecode "$(_get_param "$_params" mac)" | tr 'ABCDEF' 'abcdef')
 
 printf '%s' "$NET" | grep -qE '^[a-z][a-z0-9_]*$' \
     || { printf 'Content-Type: text/html\r\n\r\n<h1>Invalid network</h1>'; exit 0; }
@@ -56,6 +66,9 @@ _ips_f="${BASE_DIR}/${_iface}-device-ips"
 _limits_f="${BASE_DIR}/${_iface}-device-limits"
 _rules_f="${BASE_DIR}/${_iface}-device-rules"
 _pending_f="${BASE_DIR}/${_iface}-pending-${_mac_n}"
+_join_approved_f="${BASE_DIR}/${_iface}-join-approved"
+_join_pending_f="${BASE_DIR}/${_iface}-join-pending"
+_join_denied_f="${BASE_DIR}/${_iface}-join-denied"
 
 _DEV_LABEL=$(awk -v m="$MAC" 'tolower($1)==tolower(m){sub(/^[^\t]+\t/,""); print; exit}' \
     "$_labels_f" 2>/dev/null || true)
@@ -91,6 +104,24 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
             || { printf '<h1>Invalid limit</h1>'; exit 0; }
         _upsert "$_limits_f" "$MAC" "$_lim"
         setsid sh /etc/extra-networks/_regen-inspect.sh "$_iface" >/dev/null 2>&1 &
+        printf '<meta http-equiv="refresh" content="0;url=%s">' "$(_html "$_BACK_URL")"
+        exit 0
+        ;;
+
+    revoke_join_approval)
+        [ -f "$_join_approved_f" ] && {
+            grep -vixF "$MAC" "$_join_approved_f" > "${_join_approved_f}.tmp" 2>/dev/null \
+                && mv "${_join_approved_f}.tmp" "$_join_approved_f" || true
+        }
+        if [ -n "$_DEV_IP" ]; then
+            { grep -vi "^${MAC} " "$_join_pending_f" 2>/dev/null; printf '%s %s\n' "$MAC" "$_DEV_IP"; } \
+                > "${_join_pending_f}.tmp" && mv "${_join_pending_f}.tmp" "$_join_pending_f" || true
+            nft add element inet fw4 "${_iface}_join_pending" "{ ${_DEV_IP} }" 2>/dev/null || true
+        fi
+        { grep -vixF "$MAC" "$_join_denied_f" 2>/dev/null; printf '%s\n' "$MAC"; } \
+            > "${_join_denied_f}.tmp" && mv "${_join_denied_f}.tmp" "$_join_denied_f" || true
+        _ntfy "Access revoked — ${_iface}" default no_entry \
+            "${_DEV_DISPLAY} (${MAC}) is no longer approved on ${_iface}."
         printf '<meta http-equiv="refresh" content="0;url=%s">' "$(_html "$_BACK_URL")"
         exit 0
         ;;
@@ -266,6 +297,21 @@ _rules_rows=$([ -f "$_rules_f" ] && \
     done \
 || true)
 
+_approval_row=""
+if [ "$_is_approved" = yes ]; then
+    _approval_row=$(cat <<HTML
+<div class="row"><span class="lbl">Approval</span><span class="val">
+<form method="POST" action="/cgi-bin/device" onsubmit="return confirm('Revoke internet approval for $(_html "$_DEV_DISPLAY")?')">
+<input type="hidden" name="net" value="$(_html "$NET")">
+<input type="hidden" name="mac" value="$(_html "$MAC")">
+<input type="hidden" name="action" value="revoke_join_approval">
+<button class="btn-danger" type="submit">Revoke approval</button>
+</form>
+</span></div>
+HTML
+)
+fi
+
 printf 'Content-Type: text/html\r\n\r\n'
 
 cat <<HTML
@@ -292,6 +338,7 @@ a{color:#1976d2;text-decoration:none}
 form{display:inline}
 button{font-size:.75rem;padding:.15rem .45rem;cursor:pointer;background:#1976d2;
        color:#fff;border:none;border-radius:4px}
+.btn-ok{background:#2e7d32}
 .btn-danger{background:#c62828}
 input[type=text],input[type=number]{font-size:.875rem;padding:.3rem .5rem;
    border:1px solid #ccc;border-radius:4px}
@@ -307,6 +354,7 @@ input[type=text],input[type=number]{font-size:.875rem;padding:.3rem .5rem;
 <div class="row"><span class="lbl">Static IP</span><span class="val">${_DEV_IP:----}</span></div>
 <div class="row"><span class="lbl">Network</span><span class="val">$(_html "$_iface")</span></div>
 <div class="row"><span class="lbl">Join approval</span><span class="val $([ "$_is_approved" = yes ] && echo ok || echo warn)">$([ "$_is_approved" = yes ] && echo Approved || echo Pending)</span></div>
+${_approval_row}
 </div>
 
 <h2>Label</h2>

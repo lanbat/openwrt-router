@@ -71,6 +71,11 @@ a{color:#1976d2;text-decoration:none}
 form{display:inline}
 button{font-size:.75rem;padding:.15rem .45rem;cursor:pointer;background:#1976d2;
        color:#fff;border:none;border-radius:4px}
+.actions{display:inline-flex;gap:.25rem;align-items:center;margin-left:.45rem;vertical-align:middle}
+.actions form{display:inline-flex}
+.actions button{font-weight:600;padding:.22rem .55rem;border-radius:999px;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.btn-ok{background:#2e7d32}
+.btn-deny{background:#c62828}
 .btn-danger{background:#c62828}
 .net-desc{color:#555;font-size:.88rem;margin:-.4rem 0 .6rem}
 .qr{display:flex;align-items:stretch;gap:1rem}
@@ -364,22 +369,22 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
                 grep -qixF "$_mac" "$_join_approved" 2>/dev/null && _join_state="Approved"
                 grep -qixF "$_mac" "$_join_denied" 2>/dev/null && _join_state="Denied"
                 grep -qi "^${_mac} " "$_join_pending" 2>/dev/null && [ "$_join_state" = Untracked ] && _join_state="Pending"
-                printf '<td><strong>%s</strong>' "$_join_state"
+                printf '<td><strong>%s</strong><span class="actions">' "$_join_state"
                 if [ "$_join_state" != Approved ]; then
                     _jhost=$([ "$_hn" != "*" ] && printf '%s' "$_hn" || true)
-                    printf '<form method="POST" action="/cgi-bin/approve-join" style="display:inline;margin-left:.5rem">'
+                    printf '<form method="POST" action="/cgi-bin/approve-join">'
                     printf '<input type="hidden" name="net" value="%s"><input type="hidden" name="ip" value="%s"><input type="hidden" name="mac" value="%s"><input type="hidden" name="host" value="%s"><input type="hidden" name="action" value="approve">' \
                         "$(_html "$_iface")" "$(_html "$_ip")" "$(_html "$_mac")" "$(_html "$_jhost")"
-                    printf '<button type="submit">Approve</button></form>'
+                    printf '<button class="btn-ok" type="submit">Approve</button></form>'
                 fi
                 if [ "$_join_state" != Approved ] && [ "$_join_state" != Denied ]; then
                     _jhost=$([ "$_hn" != "*" ] && printf '%s' "$_hn" || true)
-                    printf '<form method="POST" action="/cgi-bin/approve-join" style="display:inline;margin-left:.25rem">'
+                    printf '<form method="POST" action="/cgi-bin/approve-join">'
                     printf '<input type="hidden" name="net" value="%s"><input type="hidden" name="ip" value="%s"><input type="hidden" name="mac" value="%s"><input type="hidden" name="host" value="%s"><input type="hidden" name="action" value="deny">' \
                         "$(_html "$_iface")" "$(_html "$_ip")" "$(_html "$_mac")" "$(_html "$_jhost")"
-                    printf '<button type="submit">Deny</button></form>'
+                    printf '<button class="btn-deny" type="submit">Deny</button></form>'
                 fi
-                printf '</td>'
+                printf '</span></td>'
             fi
             _dlabel=$(awk -v m="$_mac" \
                 'tolower($1)==tolower(m){sub(/^[^\t]+\t/,""); print; exit}' \
