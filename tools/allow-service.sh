@@ -57,7 +57,7 @@ fi
 if [ "${1:-}" = list ]; then
     found=0
     for s in $(uci show firewall 2>/dev/null \
-               | awk -F= '/^firewall\.allow_lan_/ { gsub(/\..*/, "", $1); print $1 }' \
+               | awk -F= '/^firewall\.allow_(lan_|[a-z][a-z0-9_]*_lan_)/ { gsub(/\..*/, "", $1); print $1 }' \
                | sort -u | sed 's/^firewall\.//'); do
         name=$(uci -q get firewall."$s".name 2>/dev/null || true)
         dst=$(uci -q get firewall."$s".dest_ip 2>/dev/null || true)

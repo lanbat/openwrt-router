@@ -26,10 +26,10 @@ Each network is a config file. Add a new one by copying an example.
 - **Rate limiting** — aggregate cap + optional per-device cap via nftables; no kernel modules required
 - **Port restriction** — limit outbound ports (e.g. web-only guests)
 - **MAC allowlist** — for IoT networks: unlisted devices get no lease and are blocked from forwarding
-- **LAN → isolated access** — optionally let LAN devices reach isolated devices, never the reverse
+- **LAN ↔ isolated access** — optionally let LAN devices reach isolated network devices (`LAN_ACCESS=yes`); separately, isolated devices that try to reach LAN services trigger a push notification with an **Approve** button so you can grant temporary per-service access
 - **mDNS reflection** — let guests discover shared services (Chromecast, AirPrint) via avahi
-- **Push notifications** — 12 event types via ntfy.sh: new device joined, LAN access request/approval/expiry, allowlist rejection, bandwidth alert, port forwarded/removed, password rotated, daily digest, VPN state change, router reboot
-- **Live status dashboard** — web page on the router showing all networks, connected devices with per-device traffic, VPN status, active LAN access rules, and port forwards
+- **Push notifications** — 12 event types via ntfy.sh: new device joined, LAN access request (isolated→LAN)/approval/expiry, allowlist rejection, bandwidth alert, port forwarded/removed, password rotated, daily digest, VPN state change, router reboot
+- **Live status dashboard** — web page on the router showing all networks, connected devices with per-device traffic (IPv4 and IPv6), VPN status, WireGuard server peers, pending LAN access requests, active LAN access rules, and port forwards
 - **Traffic counters** — bytes in/out per network since last firewall reload, shown in status
 - **Access schedule** — restrict internet to specific hours; auto-blocked outside the window
 - **Temporary port forwarding** — expose a LAN host to guests for a fixed time; auto-removed via cron
@@ -37,7 +37,7 @@ Each network is a config file. Add a new one by copying an example.
 - **Guest info page** — LAN-accessible HTML page with SSID, password, and QR code
 - **WPA3 support** — `sae` for WPA3-only, `sae-mixed` for WPA3+WPA2, `psk+psk2` for legacy
 - **Dual-band** — broadcast the same network on both 2.4GHz and 5GHz radios
-- **IPv6** — optional DHCPv6 + RA with auto-derived IPv6 DNS
+- **IPv6** — optional DHCPv6 + RA with auto-derived IPv6 DNS; IPv6 addresses supported throughout (device table, approval flow, firewall rules)
 - **No secrets in the repo** — WiFi keys live only in gitignored config files on the router
 - **Idempotent installs** — re-running `install.sh` updates an existing network cleanly
 
@@ -167,7 +167,7 @@ All notifications include a link to the status dashboard. LAN access requests in
 | Event | Trigger | Priority |
 |---|---|---|
 | New device joined | Device gets a DHCP lease | Low |
-| LAN access request | LAN device blocked from reaching an isolated device | Default |
+| LAN access request | Isolated device blocked from reaching a LAN service | Default |
 | LAN access approved | Access granted via web form or `allow-service.sh` | Default |
 | LAN access expired | Temporary rule removed by cron | Low |
 | Allowlist rejection | Unlisted device attempts to use the network | High |
@@ -181,11 +181,11 @@ All notifications include a link to the status dashboard. LAN access requests in
 
 ### LAN access approval
 
-When a LAN device is blocked from reaching an isolated device, you get a push with an **Approve** button. Tapping it opens a form on the router where you pick how long to allow access and optionally enter a reason. Once submitted, a second push confirms the approval with both devices' IP, MAC, and hostname.
+When an isolated device tries to reach a service on your LAN (192.168.1.x or its IPv6 equivalent), nftables logs the new connection and `check-access-log.sh` (runs every minute via cron) detects it and fires a push notification with an **Approve** button. Tapping it opens a form on the router showing the requesting device's IP, MAC, and hostname alongside the LAN destination. You pick how long to allow access, optionally enter a reason, and submit — the rule is added immediately and removed automatically when it expires. A confirmation push is sent with both devices' IP, MAC, and hostname.
 
 `DEFAULT_DURATION` pre-selects a duration in the form (default `24h`). `MAX_DURATION` hides longer options. Set `REASON_REQUIRED=yes` to make the reason field mandatory — enforced both client-side and server-side.
 
-The approval page (`/cgi-bin/approve-access`) is only reachable from your home LAN — isolated zones have `INPUT=REJECT`.
+The approval page (`/cgi-bin/approve-access`) is only reachable from your home LAN — isolated zones have `INPUT=REJECT`. Both IPv4 and IPv6 source/destination addresses are supported in the approval flow.
 
 ### Bandwidth alerts
 
@@ -199,6 +199,17 @@ Sent every morning at 08:00 with traffic totals (↓/↑), connected device coun
 
 If `/etc/split-routing/config` is present, VPN state is checked every 5 minutes. A high-priority alert fires when the VPN goes down; a default-priority alert fires when it recovers. Uses the `NOTIFY_URL` from the split-routing config if set, otherwise falls back to the first extra-networks topic.
 
+### WireGuard VPN server peers
+
+The status dashboard automatically detects WireGuard interfaces configured in server mode (those where no peer has an `endpoint_host` set in UCI). For each such interface, a table appears showing only currently connected peers — those with a handshake within the last 3 minutes. Each row includes:
+
+- **Description** — the peer's description from LuCI (`network.@wireguard_<iface>[N].description`)
+- **Endpoint** — the peer's public IP address
+- **Last handshake** — time since the last WireGuard handshake
+- **Traffic** — bytes received / sent since the last `wg` counter reset
+
+No configuration is required: the dashboard reads this directly from `wg show` output and UCI.
+
 ## Status dashboard
 
 When `NOTIFY_URL` is set, a live web dashboard is installed at:
@@ -209,10 +220,14 @@ http://192.168.1.1/cgi-bin/status
 
 The page auto-refreshes every 60 seconds and shows:
 
+- **System** — uptime, memory, load, WAN IPv4/IPv6
 - **VPN** — interface and state (up / down / routing fault)
-- **Networks** — state, subnet, traffic (↓/↑), connected devices with hostname, IP, MAC, and per-device traffic
-- **LAN access rules** — active temporary allowances with expiry time
-- **Port forwards** — all active redirects with zone, port, destination, and expiry
+- **WireGuard server peers** — auto-detected for any WireGuard interface in server mode (no outbound peers); shows peer description (from LuCI), endpoint IP, last handshake, and bytes transferred. Only currently connected peers (handshake within 3 minutes) are listed.
+- **Networks** — state, subnet, traffic (↓/↑), connected devices with hostname, IP, MAC, and per-device traffic. An IPv6 column appears automatically when the network has IPv6 configured or clients have IPv6 addresses.
+- **Pending LAN access** — blocked isolated→LAN connection attempts logged since the last check, with **Approve** buttons linking directly to the approval form
+- **Active LAN access** — temporary allowances in both directions (LAN→isolated and isolated→LAN) with destination, port, protocol, and time remaining
+- **Port forwards** — active redirects with zone, port, destination, and expiry
+- **WiFi QR codes** — SSID, password, and scannable QR code per network (when `SHOW_QR=yes`)
 
 Only reachable from LAN — isolated zones have `INPUT=REJECT`.
 
@@ -273,29 +288,44 @@ sh tools/access-schedule.sh configs/guest.conf always
 sh tools/access-schedule.sh configs/guest.conf status
 ```
 
-### Allow LAN access to a guest device
+### Temporary LAN access
 
-When `NOTIFY_URL` is set, blocked LAN→isolated connection attempts trigger a push notification with an **Approve** button. Tapping it opens a browser form on the router. You pick the duration, optionally enter a reason, and submit — the rule is added immediately and removed automatically when it expires. A confirmation push is sent with both devices' IP, MAC, and hostname, plus the duration and reason.
+The tool works in both directions and supports IPv4 and IPv6 addresses.
 
-You can also grant access directly from the command line:
+**Isolated → LAN** (the primary use case): when a guest or IoT device tries to reach a LAN service, a push notification fires with an **Approve** button. The web form shows the requesting device (IP, MAC, hostname) and the target service. Submit to add a temporary firewall rule for that specific device + port combination.
+
+**LAN → isolated**: allow a LAN device to reach a specific isolated device — for example, to SSH into a guest VM.
+
+You can also grant or revoke access directly from the command line:
 
 ```sh
-# Allow LAN to reach a guest device on port 22 for 24 hours
+# Allow a guest device to reach a LAN service (isolated → LAN)
+sh tools/allow-service.sh guest 192.168.1.100 tcp 443 24h lan
+
+# Allow a LAN device to reach a guest device (LAN → isolated)
 sh tools/allow-service.sh guest 192.168.3.105 tcp 22 24h
 
-# List all active temporary allowances
+# List all active temporary allowances (both directions)
 sh tools/allow-service.sh list
 
-# Remove one manually
+# Remove one manually (rule name shown by list)
+sh tools/allow-service.sh remove allow_guest_lan_192_168_1_100_443_tcp
 sh tools/allow-service.sh remove allow_lan_guest_192_168_3_105_22_tcp
 ```
 
 ```
-Arguments: <network> <guest-ip> <proto> <port> <duration>
+Usage: allow-service.sh <network> <dest-ip> <proto> <port> <duration> [dest-zone]
 
-  duration   1h, 6h, 12h, 24h, 2d, 7d, 30d — auto-removed via cron, survives reboots
-  proto      tcp or udp
+  network     UCI interface name (e.g. guest, untrusted)
+  dest-ip     IPv4 or IPv6 destination address
+  proto       tcp or udp
+  duration    1h, 6h, 12h, 24h, 2d, 7d, 30d — auto-removed via cron, survives reboots
+  dest-zone   lan = create an isolated→LAN rule; omit for LAN→isolated (default)
 ```
+
+Rule names follow the pattern:
+- `allow_<network>_lan_<ip>_<port>_<proto>` — isolated→LAN rules
+- `allow_lan_<network>_<ip>_<port>_<proto>` — LAN→isolated rules
 
 Rules are stored in UCI (persist across reboots). If the router reboots after the scheduled removal time has passed, remove the rule manually with `sh tools/allow-service.sh list` then `remove`.
 
