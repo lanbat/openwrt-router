@@ -38,7 +38,16 @@ uci commit wireless
 # Clear join approvals — everyone re-connects with the new password and needs re-approval
 rm -f "/etc/extra-networks/${IFACE}-join-approved" "/etc/extra-networks/${IFACE}-join-pending"
 
-wifi reload
+for _hconf in /var/run/hostapd-*.conf; do
+    grep -q "^bridge=br-${IFACE}$" "$_hconf" 2>/dev/null || continue
+    awk -v pw="$NEW_KEY" -v br="br-${IFACE}" '
+        /^bridge=/ { found = ($0 == "bridge=" br) }
+        found && /^wpa_passphrase=/ { $0 = "wpa_passphrase=" pw; found = 0 }
+        { print }
+    ' "$_hconf" > "${_hconf}.tmp" && mv "${_hconf}.tmp" "$_hconf"
+    _phy="${_hconf##*/hostapd-}"; _phy="${_phy%.conf}"
+    ubus call hostapd config_set "{\"phy\":\"${_phy}\",\"radio\":-1,\"config\":\"${_hconf}\",\"prev_config\":\"${_hconf}.prev\"}" 2>/dev/null || true
+done
 
 printf '\nPassword rotated: %s (%s)\n' "$IFACE" "${SSID:-$IFACE}"
 printf 'New password:     %s\n\n' "$NEW_KEY"

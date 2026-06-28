@@ -34,7 +34,7 @@ Each network is a config file. Add a new one by copying an example.
 - **Traffic counters** — bytes in/out per network since last firewall reload, shown in status
 - **Access schedule** — restrict internet to specific hours; auto-blocked outside the window
 - **Temporary port forwarding** — expose a LAN host to guests for a fixed time; auto-removed via cron
-- **Password rotation** — generate a new key, apply it live, and print a fresh QR code
+- **Password rotation** — generate a new key, apply it live, disconnect old clients, and print a fresh QR code
 - **Guest info page** — LAN-accessible HTML page with SSID, password, and QR code
 - **WPA3 support** — `sae` for WPA3-only, `sae-mixed` for WPA3+WPA2, `psk+psk2` for legacy
 - **Dual-band** — broadcast the same network on both 2.4GHz and 5GHz radios
@@ -399,7 +399,7 @@ Generate a new random password, apply it immediately, and print a QR code.
 sh tools/rotate-password.sh configs/guest.conf
 ```
 
-Updates the config file in place and reloads wireless. Guests on the old password are disconnected. When `JOIN_APPROVAL=yes`, all previously approved devices are cleared — everyone must be re-approved after reconnecting with the new password.
+Updates the config file in place, applies the new key to the active WiFi network, and disconnects clients still using the old password. When `JOIN_APPROVAL=yes`, all previously approved devices are cleared — everyone must be re-approved after reconnecting with the new password.
 
 ### Guest info page
 

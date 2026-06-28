@@ -63,9 +63,22 @@ _cfg="${REPO_DIR}/configs/${_iface}.conf"
 [ -n "$REPO_DIR" ] && [ -f "$_cfg" ] && grep -q '^WIFI_KEY=' "$_cfg" \
     && sed -i "s|^WIFI_KEY=.*|WIFI_KEY=${_newpw}|" "$_cfg"
 
-# Reload wireless after a delay so the browser can receive and render the
-# response before the WiFi drops. 5s gives plenty of time even on slow links.
-(sleep 5 && wifi reload >/dev/null 2>&1) &
+# Update the running hostapd config and schedule a full hostapd restart.
+# wifi reload has a phy0 MAC80211 race condition; per-BSS ubus reload does not
+# re-derive SAE passwords. config_set with a different prev_config triggers a
+# proper hostapd restart that re-reads passphrases from the config file.
+_reload_cmds="sleep 5"
+for _hconf in /var/run/hostapd-*.conf; do
+    grep -q "^bridge=br-${_iface}$" "$_hconf" 2>/dev/null || continue
+    awk -v pw="$_newpw" -v br="br-${_iface}" '
+        /^bridge=/ { found = ($0 == "bridge=" br) }
+        found && /^wpa_passphrase=/ { $0 = "wpa_passphrase=" pw; found = 0 }
+        { print }
+    ' "$_hconf" > "${_hconf}.tmp" && mv "${_hconf}.tmp" "$_hconf"
+    _phy="${_hconf##*/hostapd-}"; _phy="${_phy%.conf}"
+    _reload_cmds="${_reload_cmds}; ubus call hostapd config_set '{\"phy\":\"${_phy}\",\"radio\":-1,\"config\":\"${_hconf}\",\"prev_config\":\"${_hconf}.prev\"}' >/dev/null 2>&1"
+done
+setsid sh -c "$_reload_cmds" &
 
 # Push notification with new password
 _load_notify "$_iface"
