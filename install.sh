@@ -439,10 +439,10 @@ _cron_set() { ( crontab -l 2>/dev/null | grep -vF "# $1"; echo "$2  # $1" ) | cr
 cp "${SCRIPT_DIR}/tools/_lib.sh" "${BASE_DIR}/_lib.sh"
 
 if [ -n "$NOTIFY_URL" ]; then
-    cat >"${BASE_DIR}/dhcp-notify" <<'NOTIFYEOF'
+    mkdir -p /etc/hotplug.d/dhcp
+    cat >/etc/hotplug.d/dhcp/50-extra-networks <<'NOTIFYEOF'
 #!/bin/sh
-[ "$1" = add ] || exit 0
-_mac="$2"; _ip="$3"; _host="${4:-unknown}"
+[ "$ACTION" = add ] || exit 0
 . /etc/extra-networks/_lib.sh
 for _conf in /etc/extra-networks/*-notify.conf; do
     [ -f "$_conf" ] || continue
@@ -450,15 +450,14 @@ for _conf in /etc/extra-networks/*-notify.conf; do
     . "$_conf"
     [ -n "${NOTIFY_URL:-}" ] || continue
     [ "${NOTIFY_JOIN:-no}" = yes ] || continue
-    case "$_ip" in "$SUBNET".*) ;; *) continue ;; esac
+    case "$IPADDR" in "$SUBNET".*) ;; *) continue ;; esac
     _ntfy "Device joined — $IFACE_NAME" low "" \
-"Type: Device joined
-
-${_host} (${_mac}) joined ${IFACE_NAME} at ${_ip}."
+"${HOSTNAME:-unknown} ($MACADDR) joined $IFACE_NAME at $IPADDR."
 done
 NOTIFYEOF
-    chmod 0755 "${BASE_DIR}/dhcp-notify"
-    uci set dhcp.@dnsmasq[0].dhcpscript="${BASE_DIR}/dhcp-notify"
+    chmod 0755 /etc/hotplug.d/dhcp/50-extra-networks
+    rm -f "${BASE_DIR}/dhcp-notify"
+    uci -q del dhcp.@dnsmasq[0].dhcpscript || true
     uci commit dhcp
 
     # Install CGIs and enable uhttpd CGI support

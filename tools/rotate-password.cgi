@@ -66,9 +66,7 @@ _cfg="${REPO_DIR}/configs/${_iface}.conf"
 # Push notification with new password
 _load_notify "$_iface"
 _ntfy "Password rotated — ${_iface}" default key \
-"Type: Password rotated
-
-New WiFi password: ${_newpw}"
+"The WiFi password for ${_iface} was rotated. Scan the QR code on the dashboard to reconnect."
 
 printf 'Content-Type: text/html\r\nLocation: /cgi-bin/status\r\n\r\n'
 printf '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="2;url=/cgi-bin/status"></head>'
