@@ -209,7 +209,7 @@ How it works:
 
 The approved list is cleared automatically when the WiFi password is rotated — everyone must reconnect with the new password and be re-approved.
 
-The block set is rebuilt from the pending state file on `fw4 reload` and reboot, so blocked devices stay blocked across restarts until explicitly approved.
+The block set is rebuilt from the pending state file on `fw4 reload` and reboot, so blocked devices stay blocked across restarts until explicitly approved. Pending approvals also appear in the status dashboard with an inline **Approve** button.
 
 ### Bandwidth alerts
 
@@ -227,12 +227,13 @@ If `/etc/split-routing/config` is present, VPN state is checked every 5 minutes.
 
 The status dashboard automatically detects WireGuard interfaces configured in server mode (those where no peer has an `endpoint_host` set in UCI). For each such interface, a table appears showing only currently connected peers — those with a handshake within the last 3 minutes. Each row includes:
 
+- **Online** — ● if a handshake occurred within the last 3 minutes, ○ otherwise
 - **Description** — the peer's description from LuCI (`network.@wireguard_<iface>[N].description`)
 - **Endpoint** — the peer's public IP address
-- **Last handshake** — time since the last WireGuard handshake
+- **Last handshake** — time since last handshake (seconds, minutes, hours, or days ago); `—` if never connected
 - **Traffic** — bytes received / sent since the last `wg` counter reset
 
-No configuration is required: the dashboard reads this directly from `wg show` output and UCI.
+All configured peers are shown regardless of connection state. No configuration is required: the dashboard reads this directly from `wg show` output and UCI.
 
 ## Status dashboard
 
@@ -246,8 +247,9 @@ The page auto-refreshes every 60 seconds and shows:
 
 - **System** — uptime, memory, load, WAN IPv4/IPv6
 - **VPN** — interface and state (up / down / routing fault)
-- **WireGuard server peers** — auto-detected for any WireGuard interface in server mode (no outbound peers); shows peer description (from LuCI), endpoint IP, last handshake, and bytes transferred. Only currently connected peers (handshake within 3 minutes) are listed.
+- **WireGuard server peers** — auto-detected for any WireGuard interface in server mode (no outbound peers); shows all configured peers with an online indicator (● / ○), endpoint IP, last handshake, and bytes transferred
 - **Networks** — state, subnet, traffic (↓/↑), connected devices with hostname, IP, MAC, and per-device traffic. An IPv6 column appears automatically when the network has IPv6 configured or clients have IPv6 addresses.
+- **Pending join approvals** — devices blocked from internet until approved, with an inline **Approve** button (shown when `JOIN_APPROVAL=yes`)
 - **Pending LAN access** — blocked isolated→LAN connection attempts logged since the last check, with **Approve** buttons linking directly to the approval form
 - **Active LAN access** — temporary allowances in both directions (LAN→isolated and isolated→LAN) with destination, port, protocol, and time remaining
 - **Port forwards** — active redirects with zone, port, destination, and expiry

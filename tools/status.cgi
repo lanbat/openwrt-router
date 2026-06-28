@@ -172,29 +172,35 @@ if command -v wg >/dev/null 2>&1; then
             _drx=$(printf '%s\n' "$_wgs_peer" | cut -f6)
             _dtx=$(printf '%s\n' "$_wgs_peer" | cut -f7)
 
-            # Skip peers with no recent handshake (not currently connected)
-            [ "${_dhs:-0}" -gt 0 ] 2>/dev/null || continue
-            _ago=$(( now_ts - _dhs ))
-            [ "$_ago" -lt 180 ] || continue
-
-            _hs_str="${_ago}s ago"
-            [ "$_ago" -ge 60 ] && _hs_str="$(( _ago / 60 ))m ago"
+            _online=no
+            _hs_str="—"
+            if [ "${_dhs:-0}" -gt 0 ] 2>/dev/null; then
+                _ago=$(( now_ts - _dhs ))
+                [ "$_ago" -lt 180 ] && _online=yes
+                if   [ "$_ago" -lt 60 ];    then _hs_str="${_ago}s ago"
+                elif [ "$_ago" -lt 3600 ];  then _hs_str="$(( _ago / 60 ))m ago"
+                elif [ "$_ago" -lt 86400 ]; then _hs_str="$(( _ago / 3600 ))h ago"
+                else                             _hs_str="$(( _ago / 86400 ))d ago"
+                fi
+            fi
 
             _ep_disp="—"; [ -n "$_dep" ] && [ "$_dep" != "(none)" ] && _ep_disp="$(_html "$_dep")"
             _tr_disp="—"
             [ "${_drx:-0}" -gt 0 ] || [ "${_dtx:-0}" -gt 0 ] 2>/dev/null && \
                 _tr_disp="$(_human "${_drx:-0}") / $(_human "${_dtx:-0}")"
-            printf '<tr><td>%s</td><td>%s</td><td class="dim">%s</td><td>%s</td><td>%s</td></tr>\n' \
+            printf '<tr><td>%s</td><td>%s</td><td class="dim">%s</td><td class="%s">%s</td><td>%s</td><td>%s</td></tr>\n' \
                 "$(_html "$_peer_label")" \
                 "$_ep_disp" \
                 "$(_html "$(printf '%s' "$_aips" | tr ' ' ',')")" \
+                "$([ "$_online" = yes ] && echo ok || echo dim)" \
+                "$([ "$_online" = yes ] && echo '●' || echo '○')" \
                 "$_hs_str" \
                 "$_tr_disp"
         done >> "$_wgs_tmp" 2>/dev/null
 
         if [ -s "$_wgs_tmp" ]; then
             printf '<h2>WireGuard — %s</h2>\n' "$(_html "$_wgs")"
-            printf '<table><tr><th>Peer</th><th>Endpoint</th><th>Allowed IPs</th><th>Last seen</th><th>Traffic ↓/↑</th></tr>\n'
+            printf '<table><tr><th>Peer</th><th>Endpoint</th><th>Allowed IPs</th><th>Online</th><th>Last seen</th><th>Traffic ↓/↑</th></tr>\n'
             cat "$_wgs_tmp"
             printf '</table>\n'
         fi
@@ -211,7 +217,7 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
     [ -f "$_conf" ] || continue
     unset NOTIFY_URL SUBNET IFACE_NAME BANDWIDTH_THRESHOLD_MB \
           RATE_LIMIT RATE_LIMIT_PER_DEVICE DNS_SERVER DNS_SERVER_V6 ISOLATE LAN_ACCESS DOT \
-          SHOW_QR NOTIFY_JOIN ROTATE_PASSWORD DESCRIPTION
+          SHOW_QR NOTIFY_JOIN JOIN_APPROVAL ROTATE_PASSWORD DESCRIPTION
     . "$_conf"
     _iface="${IFACE_NAME:-}"
     [ -z "$_iface" ] && continue
@@ -353,6 +359,39 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
             printf '<td>%s</td></tr>\n' "$(_exp_str "$_exp_ts")"
         done
         printf '</table>\n'
+    fi
+
+    # ── Pending join approvals ────────────────────────────────────────────────
+
+    if [ "${JOIN_APPROVAL:-no}" = yes ]; then
+        _join_pending="${BASE_DIR}/${_iface}-join-pending"
+        if [ -s "$_join_pending" ]; then
+            _tmp_joins="/tmp/status_cgi_joins_${_iface}"
+            rm -f "$_tmp_joins"
+            while IFS= read -r _jline; do
+                case "$_jline" in '#'*|'') continue ;; esac
+                _jmac="${_jline%% *}"
+                _jip="${_jline##* }"
+                [ -z "$_jmac" ] || [ "$_jmac" = "$_jip" ] && continue
+                _jname=$(awk -v ip="$_jip" '$3==ip{print $4;exit}' /tmp/dhcp.leases 2>/dev/null)
+                printf '<tr><td>%s</td><td class="dim">%s</td><td class="dim">%s</td><td>' \
+                    "$(_html "${_jname:-unknown}")" "$_jip" "$_jmac"
+                printf '<form method="POST" action="/cgi-bin/approve-join">'
+                printf '<input type="hidden" name="net"    value="%s">' "$(_html "$_iface")"
+                printf '<input type="hidden" name="ip"     value="%s">' "$(_html "$_jip")"
+                printf '<input type="hidden" name="mac"    value="%s">' "$(_html "$_jmac")"
+                printf '<input type="hidden" name="host"   value="%s">' "$(_html "${_jname:-}")"
+                printf '<input type="hidden" name="action" value="approve">'
+                printf '<button type="submit">Approve</button></form></td></tr>\n'
+            done < "$_join_pending" >> "$_tmp_joins" 2>/dev/null
+            if [ -s "$_tmp_joins" ]; then
+                printf '<h2 style="margin-top:1.25rem">Pending join — %s</h2>' "$(_html "$_iface")"
+                printf '<table><tr><th>Device</th><th>IP</th><th>MAC</th><th></th></tr>\n'
+                cat "$_tmp_joins"
+                printf '</table>\n'
+            fi
+            rm -f "$_tmp_joins"
+        fi
     fi
 
     # ── Pending LAN access requests ───────────────────────────────────────────
