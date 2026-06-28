@@ -138,7 +138,7 @@ _domain="${_domain:-lan}"
 for _conf in "${BASE_DIR}"/*-notify.conf; do
     [ -f "$_conf" ] || continue
     unset NOTIFY_URL SUBNET IFACE_NAME BANDWIDTH_THRESHOLD_MB \
-          RATE_LIMIT RATE_LIMIT_PER_DEVICE DNS_SERVER ISOLATE LAN_ACCESS DOT \
+          RATE_LIMIT RATE_LIMIT_PER_DEVICE DNS_SERVER DNS_SERVER_V6 ISOLATE LAN_ACCESS DOT \
           SHOW_QR NOTIFY_JOIN ROTATE_PASSWORD DESCRIPTION
     . "$_conf"
     _iface="${IFACE_NAME:-}"
@@ -171,18 +171,22 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
         "$([ "$_up" = yes ] && echo Up || echo Down)"
     [ -n "${SUBNET:-}" ] && \
         printf '<div class="row"><span class="lbl">Subnet</span><span class="val">%s.0/24</span></div>' "$SUBNET"
-    _ipv6_prefix=$(ip -6 addr show "br-${_iface}" scope global 2>/dev/null \
-        | awk '/inet6/{print $2; exit}')
-    [ -n "$_ipv6_prefix" ] && \
+    _ipv6_prefixes=$(ip -6 addr show "br-${_iface}" scope global 2>/dev/null \
+        | awk '/inet6/{print $2}')
+    for _ipv6_prefix in $_ipv6_prefixes; do
         printf '<div class="row"><span class="lbl">IPv6 prefix</span><span class="val">%s</span></div>' \
             "$(_html "$_ipv6_prefix")"
+    done
     printf '<div class="row"><span class="lbl">Traffic ↓ / ↑</span><span class="val">%s / %s</span></div>' \
         "$_rxh" "$_txh"
     printf '<div class="row"><span class="lbl">Devices</span><span class="val">%s</span></div>' "$_dc"
-    [ -n "${DNS_SERVER:-}" ] && \
-        printf '<div class="row"><span class="lbl">DNS</span><span class="val">%s%s</span></div>' \
-            "$(_html "$DNS_SERVER")" \
+    if [ -n "${DNS_SERVER:-}" ]; then
+        _dns_v6_str=""
+        [ -n "${DNS_SERVER_V6:-}" ] && _dns_v6_str=" / $(_html "$DNS_SERVER_V6")"
+        printf '<div class="row"><span class="lbl">DNS</span><span class="val">%s%s%s</span></div>' \
+            "$(_html "$DNS_SERVER")" "$_dns_v6_str" \
             "$([ "${DOT:-no}" = yes ] && echo ' (DoT)' || true)"
+    fi
     if [ -n "${RATE_LIMIT:-}" ] && [ "${RATE_LIMIT:-0}" != "0" ]; then
         _prd=""
         [ "${RATE_LIMIT_PER_DEVICE:-0}" != "0" ] && _prd=" / $(_html "$RATE_LIMIT_PER_DEVICE") per device"
