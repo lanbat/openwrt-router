@@ -1,0 +1,5 @@
+# Extra domains to route through the VPN that don't fit other categories.
+# One domain per line. Lines starting with # are ignored.
+# Examples:
+# example.com
+# another-site.org

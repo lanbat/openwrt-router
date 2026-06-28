@@ -1,0 +1,3 @@
+# Local adult/NSFW domains to block in addition to the oisd list.
+# One domain per line. Examples:
+# example-adult-site.com

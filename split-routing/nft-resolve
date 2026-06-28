@@ -1,0 +1,520 @@
+#!/bin/sh
+set -eu
+
+NFT_FAMILY="inet"
+NFT_TABLE="fw4"
+SET4=""
+SET6=""
+RESOLVER="127.0.0.1"
+DEFAULT_FORMAT="auto"
+RESOLVE=1
+CHUNK4=400
+CHUNK6=200
+DOMAINS_OUT=""
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  update-nft-blocklist.sh -4 SET4 -6 SET6 [options] FORMAT=SOURCE [FORMAT=SOURCE ...]
+  update-nft-blocklist.sh -4 SET4 -6 SET6 -f FORMAT SOURCE [SOURCE ...]
+
+SOURCE can be:
+  https://...        remote text file
+  /path/file.txt     local text file
+  -                  stdin
+
+Formats:
+  auto      detect hosts, adblock, dnsmasq, unbound, ipset, URL, domain, and IP lines
+  domain    one domain per line, optional comments after #
+  hosts     hosts-file style: 0.0.0.0 example.com
+  adblock   Adblock/uBlock style: ||example.com^
+  url       URL/tracker style: udp://tracker.example.org:1337/announce
+  dnsmasq   dnsmasq config style: address=/example.com/0.0.0.0
+  rpz       BIND Response Policy Zone: example.com CNAME .
+  unbound   Unbound config: local-zone: "example.com" always_nxdomain
+  ipset     ipset save format: add setname 1.2.3.4
+  clash     Clash/Surge rules: DOMAIN,example.com or IP-CIDR,1.2.3.0/24
+  ip        IPv4/IPv6 literals or CIDR prefixes
+
+Options:
+  -4 SET        nft IPv4 set name, or - to skip IPv4
+  -6 SET        nft IPv6 set name, or - to skip IPv6
+  -F FAMILY     nft family, default: inet
+  -T TABLE      nft table, default: fw4
+  -R RESOLVER   resolver for nslookup, default: 127.0.0.1
+  -f FORMAT     default format for bare SOURCE arguments, default: auto
+  -n            do not resolve domains; only load direct IP/CIDR entries
+  -d FILE       write normalised domains to FILE as well
+  -h            help
+USAGE
+}
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+need_value() { [ "$#" -ge 2 ] || die "$1 needs a value"; }
+
+valid_format() {
+  case "$1" in
+    auto|domain|domains|hosts|host|adblock|abp|ublock|url|urls|tracker|trackers|dnsmasq|rpz|unbound|ipset|clash|surge|ip|ips|cidr) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -4) need_value "$@"; SET4="$2"; shift 2 ;;
+    -6) need_value "$@"; SET6="$2"; shift 2 ;;
+    -F) need_value "$@"; NFT_FAMILY="$2"; shift 2 ;;
+    -T) need_value "$@"; NFT_TABLE="$2"; shift 2 ;;
+    -R) need_value "$@"; RESOLVER="$2"; shift 2 ;;
+    -f) need_value "$@"; DEFAULT_FORMAT="$2"; valid_format "$DEFAULT_FORMAT" || die "unknown format: $DEFAULT_FORMAT"; shift 2 ;;
+    -n|--no-resolve) RESOLVE=0; shift ;;
+    -d|--domains-out) need_value "$@"; DOMAINS_OUT="$2"; shift 2 ;;
+    --) shift; break ;;
+    -*) die "unknown option: $1" ;;
+    *) break ;;
+  esac
+done
+
+[ -n "$SET4" ] || die "missing -4 SET4"
+[ -n "$SET6" ] || die "missing -6 SET6"
+[ "$SET4" != "-" ] || [ "$SET6" != "-" ] || die "both IPv4 and IPv6 sets are disabled"
+[ "$#" -gt 0 ] || die "no sources given"
+
+TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR"' EXIT INT TERM HUP
+
+CAND="$TMPDIR/candidates"
+CLASS="$TMPDIR/classified"
+RCLASS="$TMPDIR/resolved_classified"
+DOMAINS="$TMPDIR/domains"
+RESOLVED="$TMPDIR/resolved"
+IP4="$TMPDIR/ip4"
+IP6="$TMPDIR/ip6"
+NFT_CMDS="$TMPDIR/nft.cmds"
+: >"$CAND"
+: >"$RESOLVED"
+
+fetch_source() {
+  src="$1"
+  case "$src" in
+    http://*|https://*)
+      if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$src"
+      elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "$src"
+      else
+        die "install curl or wget to fetch remote lists"
+      fi
+      ;;
+    -) cat ;;
+    *) [ -r "$src" ] || die "cannot read source: $src"; cat "$src" ;;
+  esac
+}
+
+parse_oneper() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    {
+      sub(/\r$/, "")
+      sub(/#.*/, "")
+      line=trim($0)
+      if (line=="" || line ~ /^[!;]/) next
+      split(line, f, /[ \t]+/)
+      print f[1]
+    }'
+}
+
+parse_hosts() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    function is_v4(s,a,i){if(split(s,a,".")!=4)return 0; for(i=1;i<=4;i++){if(a[i]!~/^[0-9]+$/ || a[i]>255)return 0} return 1}
+    function is_v6(s){return s ~ /^[0-9A-Fa-f:]+$/ && s ~ /:/}
+    {
+      sub(/\r$/, "")
+      sub(/#.*/, "")
+      line=trim($0)
+      if (line=="") next
+      n=split(line, f, /[ \t]+/)
+      if (is_v4(f[1]) || is_v6(f[1])) {
+        for (i=2; i<=n; i++) print f[i]
+      }
+    }'
+}
+
+parse_adblock() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    {
+      sub(/\r$/, "")
+      line=trim($0)
+      if (line=="" || line ~ /^!/ || line ~ /^\[/ || line ~ /^@@/) next
+      if (line ~ /##/ || line ~ /#@#/ || line ~ /#\?#/) next
+
+      if (index(line, "||") == 1) line=substr(line, 3)
+      else if (index(line, "|http://") == 1) line=substr(line, 9)
+      else if (index(line, "|https://") == 1) line=substr(line, 10)
+      else if (index(line, "http://") == 1) line=substr(line, 8)
+      else if (index(line, "https://") == 1) line=substr(line, 9)
+      else if (line ~ /^[A-Za-z0-9_.-]+[\^\/\$]/) {}
+      else if (line ~ /^[A-Za-z0-9_.-]+$/) {}
+      else next
+
+      sub(/[\/\^\$:,*].*$/, "", line)
+      print line
+    }'
+}
+
+parse_url() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    {
+      sub(/\r$/, "")
+      sub(/[ \t]+#.*/, "")
+      line=trim($0)
+      if (line=="" || line ~ /^[#;]/) next
+      split(line, f, /[ \t]+/)
+      line=f[1]
+      sub(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, "", line)
+      sub(/\/.*$/, "", line)
+      sub(/\?.*$/, "", line)
+      if (line ~ /^\[/) {
+        sub(/^\[/, "", line)
+        sub(/\].*$/, "", line)
+        print line
+        next
+      }
+      sub(/^.*@/, "", line)
+      sub(/:[0-9]+$/, "", line)
+      print line
+    }'
+}
+
+parse_dnsmasq() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    {
+      sub(/\r$/, "")
+      sub(/[ \t]*#.*/, "")
+      line=trim($0)
+      if (line=="" || line ~ /^[#;]/) next
+      if (line !~ /^(address|server|local|ipset|nftset)=\//) next
+      n=split(line, p, "/")
+      for (i=2; i<=n; i++) {
+        token=p[i]
+        if (token ~ /^[A-Za-z0-9_.-]+$/ && token ~ /[A-Za-z]/) print token
+      }
+    }'
+}
+
+parse_rpz() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    {
+      sub(/\r$/, "")
+      sub(/[ \t]*;.*/, "")
+      line=trim($0)
+      if (line=="" || line ~ /^\$/ || line ~ /^@/ || line ~ /^\(/ || line ~ /^\)/) next
+      n=split(line, f, /[ \t]+/)
+      if (n < 2) next
+      d=f[1]
+      rtype=""
+      for (i=2; i<=n; i++) {
+        u=toupper(f[i])
+        if (u=="IN" || f[i]~/^[0-9]+$/) continue
+        rtype=u; break
+      }
+      if (rtype=="" || rtype~/(SOA|NS|MX|TXT|PTR|SRV|DNSKEY|RRSIG|NSEC|CAA)/) next
+      if (rtype!="A" && rtype!="AAAA" && rtype!="CNAME") next
+      sub(/\.$/, "", d); sub(/^\*\./, "", d); sub(/^\./, "", d)
+      if (d=="" || d !~ /\./ || d !~ /[A-Za-z]/) next
+      print d
+    }'
+}
+
+parse_unbound() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    {
+      sub(/\r$/, "")
+      sub(/#.*/, "")
+      line=trim($0)
+      if (line=="") next
+      if (line ~ /^local-zone:/) {
+        sub(/^local-zone:[ \t]*/, "", line)
+        split(line, f, /[ \t]+/)
+        d=f[1]; gsub(/"/, "", d); sub(/\.$/, "", d)
+        if (d ~ /\./ && d ~ /[A-Za-z]/) print d
+        next
+      }
+      if (line ~ /^local-data:/) {
+        sub(/^local-data:[ \t]*"?/, "", line); sub(/".*$/, "", line)
+        split(line, f, /[ \t]+/)
+        d=f[1]; sub(/\.$/, "", d)
+        if (d ~ /\./ && d ~ /[A-Za-z]/) print d
+        next
+      }
+    }'
+}
+
+parse_ipset() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    {
+      sub(/\r$/, "")
+      sub(/#.*/, "")
+      line=trim($0)
+      if (line=="") next
+      n=split(line, f, /[ \t]+/)
+      if (f[1]=="add" && n>=3) print f[3]
+    }'
+}
+
+parse_clash() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    {
+      sub(/\r$/, "")
+      sub(/#.*/, "")
+      line=trim($0)
+      if (line=="") next
+      if (line ~ /^- /) sub(/^- /, "", line)
+      n=split(line, f, /,/)
+      if (n < 2) next
+      type=toupper(f[1]); val=trim(f[2])
+      if (type=="DOMAIN" || type=="DOMAIN-SUFFIX" || type=="DOMAIN-KEYWORD") { print val; next }
+      if (type=="IP-CIDR" || type=="IP-CIDR6") { print val; next }
+    }'
+}
+
+parse_auto() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    function is_v4(s,a,i){if(split(s,a,".")!=4)return 0; for(i=1;i<=4;i++){if(a[i]!~/^[0-9]+$/ || a[i]>255)return 0} return 1}
+    function is_v6(s){return s ~ /^[0-9A-Fa-f:]+$/ && s ~ /:/}
+    function emit_url(line){
+      sub(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, "", line)
+      sub(/\/.*$/, "", line)
+      sub(/\?.*$/, "", line)
+      if (line ~ /^\[/) {sub(/^\[/,"",line); sub(/\].*$/,"",line); print line; return}
+      sub(/^.*@/, "", line)
+      sub(/:[0-9]+$/, "", line)
+      print line
+    }
+    function emit_dnsmasq(line, p,n,i,token){
+      n=split(line, p, "/")
+      for (i=2; i<=n; i++) {
+        token=p[i]
+        if (token ~ /^[A-Za-z0-9_.-]+$/ && token ~ /[A-Za-z]/) print token
+      }
+    }
+    {
+      sub(/\r$/, "")
+      raw=trim($0)
+      if (raw=="" || raw ~ /^[!#;]/ || raw ~ /^\[/ || raw ~ /^@@/) next
+
+      line=raw
+      sub(/[ \t]+#.*/, "", line)
+      n=split(line, f, /[ \t]+/)
+
+      if (is_v4(f[1]) || is_v6(f[1])) {
+        if (n > 1) { for (i=2; i<=n; i++) print f[i] }
+        else print f[1]
+        next
+      }
+
+      if (line ~ /^(address|server|local|ipset|nftset)=\//) { emit_dnsmasq(line); next }
+
+      if (line ~ /^local-zone:/) {
+        s=line; sub(/^local-zone:[ \t]*/, "", s); split(s, g, /[ \t]+/)
+        d=g[1]; gsub(/"/, "", d); sub(/\.$/, "", d)
+        if (d ~ /\./ && d ~ /[A-Za-z]/) print d
+        next
+      }
+      if (line ~ /^local-data:/) {
+        s=line; sub(/^local-data:[ \t]*"?/, "", s); sub(/".*$/, "", s)
+        split(s, g, /[ \t]+/); d=g[1]; sub(/\.$/, "", d)
+        if (d ~ /\./ && d ~ /[A-Za-z]/) print d
+        next
+      }
+      if (f[1]=="add" && n>=3) { print f[3]; next }
+      if (line ~ /^(DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|IP-CIDR|IP-CIDR6),/) {
+        split(line, g, /,/)
+        if (g[2]!="") print g[2]
+        next
+      }
+
+      if (index(line, "||") == 1) {
+        line=substr(line, 3)
+        sub(/[\/\^\$:,*].*$/, "", line)
+        print line
+        next
+      }
+
+      if (line ~ /^[A-Za-z][A-Za-z0-9+.-]*:\/\// || index(line, "|http://") == 1 || index(line, "|https://") == 1) {
+        if (index(line, "|http://") == 1) line=substr(line, 2)
+        if (index(line, "|https://") == 1) line=substr(line, 2)
+        emit_url(line)
+        next
+      }
+
+      sub(/#.*/, "", line)
+      line=trim(line)
+      split(line, f, /[ \t]+/)
+      print f[1]
+    }'
+}
+
+parse_format() {
+  fmt="$1"
+  case "$fmt" in
+    domain|domains) parse_oneper ;;
+    hosts|host) parse_hosts ;;
+    adblock|abp|ublock) parse_adblock ;;
+    url|urls|tracker|trackers) parse_url ;;
+    dnsmasq) parse_dnsmasq ;;
+    rpz) parse_rpz ;;
+    unbound) parse_unbound ;;
+    ipset) parse_ipset ;;
+    clash|surge) parse_clash ;;
+    ip|ips|cidr) parse_oneper ;;
+    auto) parse_auto ;;
+    *) die "unknown format: $fmt" ;;
+  esac
+}
+
+classify_candidates() {
+  awk '
+    function trim(s){gsub(/^[ \t]+|[ \t]+$/, "", s); return s}
+    function v4(s,a,i){if(split(s,a,".")!=4)return 0; for(i=1;i<=4;i++){if(a[i]!~/^[0-9]+$/ || a[i]>255)return 0} return 1}
+    function v4cidr(s,b,p){if(split(s,b,"/")!=2)return 0; if(b[2]!~/^[0-9]+$/)return 0; p=b[2]+0; return p>=0 && p<=32 && v4(b[1])}
+    function v6(s){return s ~ /^[0-9a-f:]+$/ && s ~ /:/}
+    function v6cidr(s,b,p){if(split(s,b,"/")!=2)return 0; if(b[2]!~/^[0-9]+$/)return 0; p=b[2]+0; return p>=0 && p<=128 && v6(b[1])}
+    {
+      s=tolower($0)
+      sub(/\r$/, "", s)
+      s=trim(s)
+      if (s=="") next
+
+      if (s ~ /^\[/) { sub(/^\[/, "", s); sub(/\].*$/, "", s) }
+      sub(/^\*\./, "", s)
+      sub(/^\./, "", s)
+      sub(/\.$/, "", s)
+
+      if (s ~ /^[a-z0-9_.-]+:[0-9]+$/) sub(/:[0-9]+$/, "", s)
+
+      if (s=="localhost" || s=="localdomain" || s=="broadcasthost") next
+      if (s=="0.0.0.0" || s=="127.0.0.1" || s=="::" || s=="::1") next
+
+      if (v4(s) || v4cidr(s)) { print "4 " s; next }
+      if (v6(s) || v6cidr(s)) { print "6 " s; next }
+
+      if (s ~ /^[a-z0-9_.-]+$/ && s ~ /\./ && s !~ /\.\./) print "D " s
+    }' "$@"
+}
+
+count=0
+for spec in "$@"; do
+  count=$((count + 1))
+  fmt="$DEFAULT_FORMAT"
+  src="$spec"
+  prefix="${spec%%=*}"
+
+  if [ "$prefix" != "$spec" ] && valid_format "$prefix"; then
+    fmt="$prefix"
+    src="${spec#*=}"
+  fi
+
+  srcfile="$TMPDIR/source.$count"
+  fetch_source "$src" >"$srcfile" || die "failed to fetch/read: $src"
+  parse_format "$fmt" <"$srcfile" >>"$CAND"
+done
+
+classify_candidates "$CAND" >"$CLASS"
+awk '$1=="D"{print $2}' "$CLASS" | sort -u >"$DOMAINS"
+awk '$1=="4"{print $2}' "$CLASS" | sort -u >"$IP4"
+awk '$1=="6"{print $2}' "$CLASS" | sort -u >"$IP6"
+
+if [ -n "$DOMAINS_OUT" ]; then
+  cp "$DOMAINS" "$DOMAINS_OUT"
+fi
+
+if [ "$RESOLVE" -eq 1 ]; then
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    nslookup "$d" "$RESOLVER" 2>/dev/null | awk '
+      /^Name:|^Non-authoritative answer:/ {answers=1; next}
+      answers && /^[[:space:]]*Address/ {
+        line=$0
+        sub(/^[[:space:]]*Address[[:space:]]*[0-9]*:[[:space:]]*/, "", line)
+        split(line, a, /[ \t]+/)
+        ip=a[1]
+        sub(/%.*$/, "", ip)
+        if (ip != "") print ip
+      }'
+  done <"$DOMAINS" >"$RESOLVED" || true
+fi
+
+: >"$RCLASS"
+if [ -s "$RESOLVED" ]; then
+  classify_candidates "$RESOLVED" >"$RCLASS"
+fi
+
+awk '$1=="4"{print $2}' "$RCLASS" >>"$IP4" || true
+awk '$1=="6"{print $2}' "$RCLASS" >>"$IP6" || true
+sort -u "$IP4" >"$IP4.sorted"; mv "$IP4.sorted" "$IP4"
+sort -u "$IP6" >"$IP6.sorted"; mv "$IP6.sorted" "$IP6"
+
+nft list table "$NFT_FAMILY" "$NFT_TABLE" >/dev/null 2>&1 || die "nft table does not exist: $NFT_FAMILY $NFT_TABLE"
+
+if [ "$SET4" != "-" ]; then
+  nft add set "$NFT_FAMILY" "$NFT_TABLE" "$SET4" '{ type ipv4_addr; flags interval; }' 2>/dev/null || true
+fi
+
+if [ "$SET6" != "-" ]; then
+  nft add set "$NFT_FAMILY" "$NFT_TABLE" "$SET6" '{ type ipv6_addr; flags interval; }' 2>/dev/null || true
+fi
+
+emit_nft_elements() {
+  setname="$1"
+  file="$2"
+  chunk_size="$3"
+
+  echo "flush set $NFT_FAMILY $NFT_TABLE $setname"
+  [ -s "$file" ] || return 0
+
+  chunk=""
+  n=0
+
+  while IFS= read -r ip; do
+    [ -n "$ip" ] || continue
+
+    if [ -z "$chunk" ]; then
+      chunk="$ip"
+    else
+      chunk="$chunk, $ip"
+    fi
+
+    n=$((n + 1))
+
+    if [ "$n" -ge "$chunk_size" ]; then
+      echo "add element $NFT_FAMILY $NFT_TABLE $setname { $chunk }"
+      chunk=""
+      n=0
+    fi
+  done <"$file"
+
+  [ -n "$chunk" ] && echo "add element $NFT_FAMILY $NFT_TABLE $setname { $chunk }"
+}
+
+{
+  [ "$SET4" = "-" ] || emit_nft_elements "$SET4" "$IP4" "$CHUNK4"
+  [ "$SET6" = "-" ] || emit_nft_elements "$SET6" "$IP6" "$CHUNK6"
+} >"$NFT_CMDS"
+
+nft -f "$NFT_CMDS"
+
+echo "Updated nft sets in $NFT_FAMILY $NFT_TABLE"
+[ "$SET4" = "-" ] || echo "IPv4 set $SET4: $(wc -l <"$IP4") elements"
+[ "$SET6" = "-" ] || echo "IPv6 set $SET6: $(wc -l <"$IP6") elements"
+echo "Domains parsed: $(wc -l <"$DOMAINS") from $count source(s)"

@@ -1,0 +1,4 @@
+# Local tracker URLs or tracker hosts.
+# Examples:
+# udp://tracker.example.org:1337/announce
+# https://tracker.example.net/announce

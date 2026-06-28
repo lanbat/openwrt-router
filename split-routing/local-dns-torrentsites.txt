@@ -1,0 +1,4 @@
+# Local domains to resolve and route through the mvlist nft sets.
+# Examples:
+# example-torrent-site.com
+# another-example.org
