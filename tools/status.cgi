@@ -72,12 +72,12 @@ button{font-size:.75rem;padding:.15rem .45rem;cursor:pointer;background:#1976d2;
        color:#fff;border:none;border-radius:4px}
 .btn-danger{background:#c62828}
 .net-desc{color:#555;font-size:.88rem;margin:-.4rem 0 .6rem}
-.qr{display:flex;align-items:center;gap:1rem}
-.qr img{width:120px;height:120px;flex-shrink:0;border-radius:4px}
-.qr-info{font-size:.9rem}
+.qr{display:flex;align-items:stretch;gap:1rem}
+.qr-info{font-size:.9rem;display:flex;flex-direction:column}
 .qr-info strong{display:block;margin-bottom:.3rem}
 .qr-info code{background:#e8e8e8;padding:.2rem .45rem;border-radius:4px;
               word-break:break-all;font-size:.85rem}
+.qr-info form{margin-top:auto;padding-top:.6rem;text-align:right}
 </style></head><body>
 <h1>${hostname}</h1>
 <div class="sub">${now} &nbsp;·&nbsp; <a href="">Refresh</a></div>
@@ -199,10 +199,14 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
 
     _key=$(uci -q get wireless."$_iface".key 2>/dev/null || true)
     if [ "${SHOW_QR:-no}" = yes ] && [ -n "$_key" ] && [ -n "$_ssid" ] && command -v qrencode >/dev/null 2>&1; then
-        printf '<div class="card qr"><img src="/cgi-bin/qr?net=%s" width="120" height="120"><div class="qr-info"><strong>%s</strong><code>%s</code>' \
-            "$_iface" "$(_html "$_ssid")" "$(_html "$_key")"
+        _enc=$(uci -q get wireless."$_iface".encryption 2>/dev/null || true)
+        case "$_enc" in sae*|psk*) _wtype=WPA ;; wep*) _wtype=WEP ;; *) _wtype=nopass ;; esac
+        _qrdata=$(qrencode -t ASCII -m 2 -o - \
+            "WIFI:S:${_ssid};T:${_wtype};P:${_key};;" 2>/dev/null | tr '\n' '|')
+        printf '<div class="card qr"><div class="qr-canvas" data-qr="%s"></div><div class="qr-info"><strong>%s</strong><code>%s</code>' \
+            "$_qrdata" "$(_html "$_ssid")" "$(_html "$_key")"
         [ "${ROTATE_PASSWORD:-no}" = yes ] && \
-            printf '<form method="POST" action="/cgi-bin/rotate-password" style="margin-top:.6rem;text-align:right"><input type="hidden" name="net" value="%s"><button class="btn-danger" type="submit" onclick="return confirm('\''Rotate the WiFi password for %s? All connected devices will need to reconnect with the new password.'\'')">Rotate password</button></form>' \
+            printf '<form method="POST" action="/cgi-bin/rotate-password"><input type="hidden" name="net" value="%s"><button class="btn-danger" type="submit" onclick="return confirm('\''Rotate the WiFi password for %s? All connected devices will need to reconnect with the new password.'\'')">Rotate password</button></form>' \
                 "$(_html "$_iface")" "$(_html "$_iface")"
         printf '</div></div>\n'
     fi
@@ -390,4 +394,26 @@ if [ -n "$_pfwd" ]; then
     printf '</table>\n'
 fi
 
+cat <<'SCRIPT'
+<script>
+(function(){
+  var q=document.querySelectorAll('.qr-canvas');
+  for(var i=0;i<q.length;i++){
+    var el=q[i],lines=el.getAttribute('data-qr').split('|').filter(Boolean);
+    if(!lines.length)continue;
+    var cols=lines[0].length,rows=lines.length,mods=cols>>1;
+    var cv=document.createElement('canvas');
+    cv.width=mods;cv.height=rows;
+    cv.style.cssText='width:120px;height:120px;image-rendering:pixelated;flex-shrink:0;border-radius:4px';
+    var ctx=cv.getContext('2d');
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,mods,rows);
+    ctx.fillStyle='#000';
+    for(var y=0;y<rows;y++)
+      for(var x=0;x<cols;x+=2)
+        if(lines[y][x]==='#')ctx.fillRect(x>>1,y,1,1);
+    el.parentNode.replaceChild(cv,el);
+  }
+})();
+</script>
+SCRIPT
 printf '</body></html>\n'
