@@ -41,7 +41,7 @@ if [ "${1:-}" = remove ]; then
     if [ -n "$_iface" ] && [ -n "$_dest_ip" ]; then
         _load_notify "$_iface"
         if [ -n "${NOTIFY_URL:-}" ]; then
-            _dst_name=$(awk -v ip="$_dest_ip" '$3==ip { print $4; exit }' /tmp/dhcp.leases 2>/dev/null)
+            _dst_name=$(_name_for_ip "$_dest_ip")
             _dst_label="${_dst_name:+${_dst_name} (${_dest_ip})}${_dst_name:-${_dest_ip}}"
             _ntfy "Access expired — ${_iface}" low clock1 \
 "Type: Access expired
@@ -97,8 +97,8 @@ case "$DURATION" in
     *)   echo "ERROR: duration format: 1h, 6h, 24h, 2d, 7d"; exit 1 ;;
 esac
 
-# Build a stable rule name from the parameters
-_ip_slug=$(echo "$DEST_IP" | tr '.' '_')
+# Build a stable rule name from the parameters (works for both IPv4 and IPv6)
+_ip_slug=$(printf '%s' "$DEST_IP" | sed 's/[.:]/\_/g')
 RULE_NAME="allow_lan_${IFACE}_${_ip_slug}_${PORT}_${PROTO}"
 
 # Idempotent: remove existing rule with same name first
@@ -113,6 +113,7 @@ uci set firewall."$RULE_NAME".dest_ip="$DEST_IP"
 uci set firewall."$RULE_NAME".proto="$PROTO"
 uci set firewall."$RULE_NAME".dest_port="$PORT"
 uci set firewall."$RULE_NAME".target=ACCEPT
+case "$DEST_IP" in *:*) uci set firewall."$RULE_NAME".family=ipv6 ;; esac
 uci commit firewall
 fw4 reload >/dev/null
 
@@ -138,7 +139,7 @@ CRON_LINE="$_cmin $_chour $_cday $_cmon * sh $SCRIPT_DIR/allow-service.sh remove
 _exp_human=$(date -d "@$_exp" '+%H:%M on %d/%m/%Y' 2>/dev/null \
              || printf '%02d:%02d on %s/%s' "$_chour" "$_cmin" "$_cday" "$_cmon")
 
-dst_name=$(awk -v ip="$DEST_IP" '$3==ip { print $4; exit }' /tmp/dhcp.leases 2>/dev/null)
+dst_name=$(_name_for_ip "$DEST_IP")
 echo "Allowed:  LAN → ${dst_name:+$dst_name (}${DEST_IP}${dst_name:+)}:${PORT}/${PROTO}"
 echo "Expires:  $_exp_human"
 echo "Remove:   sh $SCRIPT_DIR/allow-service.sh remove $RULE_NAME"

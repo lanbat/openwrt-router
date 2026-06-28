@@ -10,6 +10,27 @@ _load_notify() {
     true
 }
 
+# Resolve a hostname for an IP (IPv4: DHCP leases; IPv6: neighbour → leases).
+_name_for_ip() {
+    case "$1" in
+        *:*) _m=$(ip -6 neigh show 2>/dev/null | \
+                awk -v ip="$1" 'tolower($1)==tolower(ip)&&/lladdr/{print $3;exit}')
+             [ -n "$_m" ] && awk -v m="$_m" \
+                'tolower($2)==tolower(m){print $4;exit}' /tmp/dhcp.leases 2>/dev/null \
+             || true ;;
+        *)   awk -v ip="$1" '$3==ip{print $4;exit}' /tmp/dhcp.leases 2>/dev/null ;;
+    esac
+}
+
+# Resolve a MAC address for an IP (IPv4: DHCP leases; IPv6: neighbour table).
+_mac_for_ip() {
+    case "$1" in
+        *:*) ip -6 neigh show 2>/dev/null | \
+                awk -v ip="$1" 'tolower($1)==tolower(ip)&&/lladdr/{print $3;exit}' ;;
+        *)   awk -v ip="$1" '$3==ip{print $2;exit}' /tmp/dhcp.leases 2>/dev/null ;;
+    esac
+}
+
 # Send a push notification via ntfy. Requires NOTIFY_URL to be set.
 # Usage: _ntfy <title> <priority> <tags> <body> [extra_action]
 # extra_action: prepended before the dashboard action, e.g. "view, Approve, URL"

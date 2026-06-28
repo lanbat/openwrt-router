@@ -24,7 +24,11 @@ _urldecode() {
 }
 
 _valid_ip() {
-    echo "$1" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+    case "$1" in
+        *.*.*.*)  printf '%s' "$1" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' ;;
+        *:*)      printf '%s' "$1" | grep -qE '^[0-9a-fA-F:]{2,39}$' ;;
+        *)        return 1 ;;
+    esac
 }
 
 _html() {
@@ -46,6 +50,7 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
     _origin="${HTTP_ORIGIN:-${HTTP_REFERER:-}}"
     case "$_origin" in
         ""|http://192.168.*|http://10.*|http://172.1[6-9].*|http://172.2[0-9].*|http://172.3[01].*) ;;
+        http://\[fd*|http://\[fc*|http://\[fe80*|http://\[::1\]*) ;;  # IPv6 ULA / link-local
         *) printf 'Content-Type: text/html\r\n\r\nForbidden'; exit 0 ;;
     esac
 fi
@@ -97,10 +102,10 @@ _max_secs=$(_dur_secs "$MAX_DURATION")
 
 # ── resolve names and MACs ────────────────────────────────────────────────────
 
-src_name=$(awk -v ip="$SRC" '$3==ip { print $4; exit }' /tmp/dhcp.leases 2>/dev/null)
-dst_name=$(awk -v ip="$DST" '$3==ip { print $4; exit }' /tmp/dhcp.leases 2>/dev/null)
-src_mac=$(awk  -v ip="$SRC" '$3==ip { print $2; exit }' /tmp/dhcp.leases 2>/dev/null)
-dst_mac=$(awk  -v ip="$DST" '$3==ip { print $2; exit }' /tmp/dhcp.leases 2>/dev/null)
+src_name=$(_name_for_ip "$SRC")
+dst_name=$(_name_for_ip "$DST")
+src_mac=$(_mac_for_ip  "$SRC")
+dst_mac=$(_mac_for_ip  "$DST")
 src_label=$([ -n "$src_name" ] && printf '%s (%s)' "$(_html "$src_name")" "$SRC" || printf '%s' "$SRC")
 dst_label=$([ -n "$dst_name" ] && printf '%s (%s)' "$(_html "$dst_name")" "$DST" || printf '%s' "$DST")
 src_plain=$([ -n "$src_name" ] && printf '%s (%s)' "$src_name" "$SRC" || printf '%s' "$SRC")

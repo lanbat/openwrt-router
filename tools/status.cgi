@@ -114,9 +114,11 @@ printf '</div>\n'
 # ── VPN ────────────────────────────────────────────────────────────────────────
 
 VPN_CFG=/etc/split-routing/config
+_vpn_iface=""
 if [ -f "$VPN_CFG" ]; then
     unset VPN_IFACE ROUTE_TABLE FWMARK NOTIFY_URL
     . "$VPN_CFG"
+    _vpn_iface="${VPN_IFACE:-}"
     _if_up=no; ip link show "$VPN_IFACE" 2>/dev/null | grep -q "LOWER_UP" && _if_up=yes
     _rule=no;  ip rule show 2>/dev/null | grep -q "lookup ${ROUTE_TABLE}" && _rule=yes
     _rt=no;    ip route show table "$ROUTE_TABLE" 2>/dev/null | grep -q "^default" && _rt=yes
@@ -128,6 +130,71 @@ if [ -f "$VPN_CFG" ]; then
     printf '<div class="row"><span class="lbl">Interface</span><span class="val">%s</span></div>' "$VPN_IFACE"
     printf '<div class="row"><span class="lbl">Status</span><span class="val %s">%s</span></div>' "$_vc" "$_vl"
     printf '</div>\n'
+fi
+
+# ── WireGuard server peers ─────────────────────────────────────────────────────
+# Show any WireGuard interface that acts as a server (no outbound endpoint on peers).
+
+if command -v wg >/dev/null 2>&1; then
+    for _wgs in $(uci show network 2>/dev/null \
+        | awk -F= "/\\.proto='wireguard'/"'{sub(/\.proto.*/,"",$1);sub(/^network\./,"",$1);print $1}'); do
+
+        [ "$_wgs" = "$_vpn_iface" ] && continue
+
+        # Detect server: none of its UCI peers have endpoint_host set
+        _wgs_is_server=yes; _pi=0
+        while true; do
+            _pk=$(uci -q get "network.@wireguard_${_wgs}[${_pi}].public_key" 2>/dev/null || true)
+            [ -z "$_pk" ] && break
+            _ep=$(uci -q get "network.@wireguard_${_wgs}[${_pi}].endpoint_host" 2>/dev/null || true)
+            [ -n "$_ep" ] && { _wgs_is_server=no; break; }
+            _pi=$(( _pi + 1 ))
+        done
+        [ "$_wgs_is_server" = no ] && continue
+
+        _wgs_dump=$(wg show "$_wgs" dump 2>/dev/null | tail -n +2)
+        printf '<h2>WireGuard — %s</h2>\n' "$(_html "$_wgs")"
+        printf '<table><tr><th>Peer</th><th>Endpoint</th><th>Allowed IPs</th><th>Last seen</th><th>Traffic ↓/↑</th></tr>\n'
+
+        _pi=0
+        while true; do
+            _pk=$(uci -q get "network.@wireguard_${_wgs}[${_pi}].public_key" 2>/dev/null || true)
+            [ -z "$_pk" ] && break
+            _desc=$(uci -q get "network.@wireguard_${_wgs}[${_pi}].description" 2>/dev/null || true)
+            _aips=$(uci -q get "network.@wireguard_${_wgs}[${_pi}].allowed_ips" 2>/dev/null \
+                | awk '{printf "%s%s", sep, $0; sep=", "} END{if(!NR)print "—"}')
+            _pi=$(( _pi + 1 ))
+
+            _peer_label="${_desc:-$(printf '%s' "$_pk" | head -c 8)…}"
+            _wgs_peer=$(printf '%s\n' "$_wgs_dump" | awk -F'\t' -v pk="$_pk" '$1==pk{print;exit}')
+            _dep=$(printf '%s\n' "$_wgs_peer" | cut -f3)
+            _dhs=$(printf '%s\n' "$_wgs_peer" | cut -f5)
+            _drx=$(printf '%s\n' "$_wgs_peer" | cut -f6)
+            _dtx=$(printf '%s\n' "$_wgs_peer" | cut -f7)
+
+            _hs_str="never"
+            if [ "${_dhs:-0}" -gt 0 ] 2>/dev/null; then
+                _ago=$(( now_ts - _dhs ))
+                if   [ "$_ago" -lt 60 ];    then _hs_str="${_ago}s ago"
+                elif [ "$_ago" -lt 3600 ];  then _hs_str="$(( _ago / 60 ))m ago"
+                elif [ "$_ago" -lt 86400 ]; then _hs_str="$(( _ago / 3600 ))h $(( (_ago % 3600) / 60 ))m ago"
+                else                             _hs_str="$(( _ago / 86400 ))d ago"
+                fi
+            fi
+
+            _ep_disp="—"; [ -n "$_dep" ] && [ "$_dep" != "(none)" ] && _ep_disp="$(_html "$_dep")"
+            _tr_disp="—"
+            [ "${_drx:-0}" -gt 0 ] || [ "${_dtx:-0}" -gt 0 ] 2>/dev/null && \
+                _tr_disp="$(_human "${_drx:-0}") / $(_human "${_dtx:-0}")"
+            printf '<tr><td>%s</td><td>%s</td><td class="dim">%s</td><td>%s</td><td>%s</td></tr>\n' \
+                "$(_html "$_peer_label")" \
+                "$_ep_disp" \
+                "$(_html "$(printf '%s' "$_aips" | tr ' ' ',')")" \
+                "$_hs_str" \
+                "$_tr_disp"
+        done
+        printf '</table>\n'
+    done
 fi
 
 # ── Networks ───────────────────────────────────────────────────────────────────
@@ -231,7 +298,9 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
         _bw_data6=$(nft list set inet fw4 "${_iface}_device_bytes6" 2>/dev/null)
         _hdr_bw=$([ -n "$_bw_data$_bw_data6" ] && echo yes || echo no)
         _hdr_sig=$([ -n "$_assoc" ] && echo yes || echo no)
-        _hdr_ip6=$([ -n "$_ipv6_prefixes" ] && echo yes || echo no)
+        _hdr_ip6=no
+        [ -n "$_ipv6_prefixes" ] && _hdr_ip6=yes
+        uci -q get dhcp."$_iface".dhcpv6 2>/dev/null | grep -q server && _hdr_ip6=yes || true
 
         printf '<table><tr><th>Hostname</th><th>DNS</th><th>IPv4</th><th>Joined</th>'
         [ "$_hdr_ip6" = yes ] && printf '<th>IPv6</th>'
