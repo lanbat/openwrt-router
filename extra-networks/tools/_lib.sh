@@ -35,7 +35,10 @@ _mac_for_ip() {
 }
 
 _ip4_for_mac() {
-    awk -v m="$1" 'tolower($2)==tolower(m){print $3;exit}' /tmp/dhcp.leases 2>/dev/null
+    _m=$(awk -v m="$1" 'tolower($2)==tolower(m){print $3;exit}' /tmp/dhcp.leases 2>/dev/null)
+    [ -n "$_m" ] || _m=$(ip neigh show 2>/dev/null | \
+        awk -v m="$1" '$1!~/:/&&/lladdr/{for(i=1;i<=NF;i++)if($i=="lladdr"&&tolower($(i+1))==tolower(m)){print $1;exit}}')
+    printf '%s' "$_m"
 }
 
 _ip6_for_mac() {
