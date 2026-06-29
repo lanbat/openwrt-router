@@ -579,8 +579,6 @@ if [ -n "$_history_rows" ]; then
         _hip="${_ip4:-${_ip6:----}}"
         if [ -n "$_actor_mac" ]; then
             _by_cell="<a href=\"/cgi-bin/device?net=lan&mac=$(_html "$_actor_mac")\">$(_html "$_actor_mac")</a>"
-            [ -n "$_actor_ip4" ] && _by_cell="${_by_cell} <span class=\"dim\">$(_html "$_actor_ip4")</span>"
-            [ -n "$_actor_ip6" ] && _by_cell="${_by_cell}<br><span class=\"dim\">$(_html "$_actor_ip6")</span>"
         else
             _by_cell="$(_html "${_actor:-unknown}")"
         fi
