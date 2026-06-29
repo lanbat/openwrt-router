@@ -445,6 +445,7 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
             BEGIN{
                 while((getline ln<lf)>0){split(ln,a,"\t");lab[tolower(a[1])]=a[2]}
                 while((getline ln<"/tmp/dhcp.leases")>0){split(ln,a," ");if(a[3]!=""&&a[2]!="")lm[a[3]]=a[2]}
+                while(("ip neigh show" | getline ln)>0){n2=split(ln,a," ");for(i=1;i<n2;i++)if(a[i]=="lladdr"){arp[a[1]]=a[i+1];break}}
                 bcls["approved"]="approved";bcls["denied"]="denied";bcls["revoked"]="revoked"
                 bcls["connected"]="connected";bcls["disconnected"]="disconnected"
                 blbl["approved"]="Approved";blbl["denied"]="Denied";blbl["revoked"]="Revoked"
@@ -457,6 +458,7 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
                     act=ra[i];when=rw[i];dmac=rm[i];ip4=ri4[i];ip6=ri6[i];host=rh[i]
                     actor=rac[i];amac=rmac[i];aip4=rami[i];aip6=rami6[i]
                     if(amac==""&&aip4!=""&&aip4 in lm)amac=lm[aip4]
+                    if(amac==""&&aip4!=""&&aip4 in arp)amac=arp[aip4]
                     if(actor==""&&host!="")actor=host
                     cls=(act in bcls)?bcls[act]:"untracked"
                     lbl=(act in blbl)?blbl[act]:h(act)

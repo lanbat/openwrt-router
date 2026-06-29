@@ -26,8 +26,11 @@ _name_for_ip() {
 _mac_for_ip() {
     case "$1" in
         *:*) ip -6 neigh show 2>/dev/null | \
-                awk -v ip="$1" 'tolower($1)==tolower(ip)&&/lladdr/{print $3;exit}' ;;
-        *)   awk -v ip="$1" '$3==ip{print $2;exit}' /tmp/dhcp.leases 2>/dev/null ;;
+                awk -v ip="$1" 'tolower($1)==tolower(ip)&&/lladdr/{for(i=1;i<=NF;i++)if($i=="lladdr"){print $(i+1);exit}}' ;;
+        *)   _m=$(awk -v ip="$1" '$3==ip{print $2;exit}' /tmp/dhcp.leases 2>/dev/null)
+             [ -n "$_m" ] || _m=$(ip neigh show 2>/dev/null | \
+                awk -v ip="$1" '$1==ip&&/lladdr/{for(i=1;i<=NF;i++)if($i=="lladdr"){print $(i+1);exit}}')
+             printf '%s' "$_m" ;;
     esac
 }
 
