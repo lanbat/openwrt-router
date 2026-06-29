@@ -439,30 +439,32 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
             && _join_history_prune "$_iface" "${JOIN_HISTORY_RETENTION:-90d}"
         if [ -s "$_history" ]; then
             printf '<h2 style="margin-top:1.25rem">Join history — %s</h2>' "$(_html "$_iface")"
-            printf '<table><tr><th>When</th><th>Decision</th><th>Device</th><th>IPv4</th><th>IPv6</th><th>MAC</th><th>By</th><th>By IPv4</th><th>By IPv6</th><th>By MAC</th></tr>\n'
+            printf '<table><tr><th>When</th><th>Decision</th><th>Label</th><th>IP</th><th>MAC</th><th>By</th></tr>\n'
             tail -20 "$_history" 2>/dev/null | while IFS=$(printf '\t') read -r _ts _when _act _mac _ip4 _ip6 _host _actor _actor_ip4 _actor_ip6 _actor_mac; do
                 [ -n "$_ts" ] || continue
                 if [ -z "$_actor" ] && [ -n "$_host" ]; then
-                    # Older history rows stored: ts, when, action, mac, ip, host, actor.
-                    _actor="$_host"
-                    _host="$_ip6"
-                    _ip6=""
+                    # Older history rows: ts, when, action, mac, ip, host, actor.
+                    _actor="$_host"; _host="$_ip6"; _ip6=""
                 fi
                 _cls=$(printf '%s' "$_act" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
                 case "$_cls" in approved|denied|revoked) ;; *) _cls=untracked ;; esac
                 case "$_act" in
-                    approved) _label=Approved ;;
-                    denied)   _label=Denied ;;
-                    revoked)  _label=Revoked ;;
-                    *)        _label="$(_html "$_act")" ;;
+                    approved) _badge=Approved ;;
+                    denied)   _badge=Denied ;;
+                    revoked)  _badge=Revoked ;;
+                    *)        _badge="$(_html "$_act")" ;;
                 esac
-                [ -n "$_host" ] && [ "$_host" != unknown ] || _host="$_mac"
-                printf '<tr><td class="dim">%s</td><td><span class="badge badge-%s">%s</span></td><td>%s</td><td>%s</td><td>%s</td><td class="dim"><a href="/cgi-bin/device?net=%s&mac=%s">%s</a></td><td>%s</td><td>%s</td><td>%s</td><td class="dim">%s</td></tr>\n' \
-                    "$(_html "$_when")" "$_cls" "$_label" "$(_html "$_host")" \
-                    "$(_html "${_ip4:----}")" "$(_html "${_ip6:----}")" \
-                    "$(_html "$_iface")" "$(_html "$_mac")" "$(_html "$_mac")" \
-                    "$(_html "${_actor:-unknown}")" "$(_html "${_actor_ip4:----}")" \
-                    "$(_html "${_actor_ip6:----}")" "$(_html "${_actor_mac:----}")"
+                _hlabel=$(awk -v m="$_mac" \
+                    'tolower($1)==tolower(m){sub(/^[^\t]+\t/,""); print; exit}' \
+                    "${BASE_DIR}/${_iface}-device-labels" 2>/dev/null || true)
+                [ -z "$_hlabel" ] && { [ -n "$_host" ] && [ "$_host" != unknown ] \
+                    && _hlabel="$_host" || _hlabel="$_mac"; }
+                _hip="${_ip4:-${_ip6:----}}"
+                printf '<tr><td class="dim">%s</td><td><span class="badge badge-%s">%s</span></td><td><a href="/cgi-bin/device?net=%s&mac=%s">%s</a></td><td>%s</td><td class="dim">%s</td><td class="dim">%s</td></tr>\n' \
+                    "$(_html "$_when")" "$_cls" "$_badge" \
+                    "$(_html "$_iface")" "$(_html "$_mac")" "$(_html "$_hlabel")" \
+                    "$(_html "$_hip")" "$(_html "$_mac")" \
+                    "$(_html "${_actor:-unknown}")"
             done
             printf '</table>\n'
         fi
