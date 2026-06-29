@@ -484,6 +484,10 @@ input[type=text],input[type=number]{font-size:.875rem;padding:.3rem .5rem;
    border:1px solid #ccc;border-radius:4px}
 .irow{display:flex;gap:.5rem;align-items:center;margin:.4rem 0}
 .tag-allow{color:#2e7d32;font-weight:600}.tag-deny{color:#c62828;font-weight:600}
+.badge{font-size:.7rem;font-weight:700;padding:.15rem .45rem;border-radius:999px;
+       text-transform:uppercase;letter-spacing:.04em;color:#fff}
+.badge-approved{background:#2e7d32}.badge-denied{background:#c62828}
+.badge-revoked{background:#e65100}
 </style></head><body>
 <h1>$(_html "$_DEV_DISPLAY")</h1>
 <div class="sub">$(_html "$_iface") &nbsp;·&nbsp; $(_html "$MAC") &nbsp;·&nbsp; <a href="/cgi-bin/status">Dashboard</a></div>
@@ -549,6 +553,37 @@ if [ -n "$_rules_rows" ]; then
     printf '</table>\n'
 else
     printf '<p class="dim">No rules yet.</p>\n'
+fi
+
+printf '<h2>History</h2>\n'
+_history_f="${BASE_DIR}/${_iface}-join-history"
+if [ -f "$_history_f" ]; then
+    _history_rows=$(awk -v m="$MAC" -F'\t' 'tolower($4)==tolower(m){print}' \
+        "$_history_f" 2>/dev/null | tail -20)
+fi
+if [ -n "$_history_rows" ]; then
+    printf '<table><tr><th>When</th><th>Decision</th><th>IP</th><th>By</th></tr>\n'
+    printf '%s\n' "$_history_rows" | while IFS=$(printf '\t') read -r _ts _when _act _hmac _ip4 _ip6 _hhost _actor _actor_ip4 _actor_ip6 _actor_mac; do
+        [ -n "$_ts" ] || continue
+        if [ -z "$_actor" ] && [ -n "$_hhost" ]; then
+            _actor="$_hhost"; _hhost="$_ip6"; _ip6=""
+        fi
+        _cls=$(printf '%s' "$_act" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
+        case "$_cls" in approved|denied|revoked) ;; *) _cls=untracked ;; esac
+        case "$_act" in
+            approved) _badge=Approved ;;
+            denied)   _badge=Denied ;;
+            revoked)  _badge=Revoked ;;
+            *)        _badge="$(_html "$_act")" ;;
+        esac
+        _hip="${_ip4:-${_ip6:----}}"
+        printf '<tr><td class="dim">%s</td><td><span class="badge badge-%s">%s</span></td><td>%s</td><td class="dim">%s</td></tr>\n' \
+            "$(_html "$_when")" "$_cls" "$_badge" \
+            "$(_html "$_hip")" "$(_html "${_actor:-unknown}")"
+    done
+    printf '</table>\n'
+else
+    printf '<p class="dim">No history yet.</p>\n'
 fi
 
 printf '<h2 style="margin-top:2rem;color:#b71c1c">Danger zone</h2>\n'
