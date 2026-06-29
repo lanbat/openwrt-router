@@ -557,7 +557,7 @@ if [ -f "$_history_f" ]; then
     tolower($4)==tolower(mac){n++;rw[n]=$2;ra[n]=$3;ri4[n]=$5;ri6[n]=$6;rh[n]=$7;rac[n]=$8;rmac[n]=$11}
     END{
         s=(n>20)?n-19:1
-        for(i=s;i<=n;i++){
+        for(i=n;i>=s;i--){
             act=ra[i];actor=rac[i];host=rh[i];ip6=ri6[i];amac=rmac[i]
             if(actor==""&&host!="")actor=host
             cls=(act in bcls)?bcls[act]:"untracked"

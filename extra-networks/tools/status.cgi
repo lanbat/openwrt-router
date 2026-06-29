@@ -453,7 +453,7 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
             {n++;rw[n]=$2;ra[n]=$3;rm[n]=$4;ri4[n]=$5;ri6[n]=$6;rh[n]=$7;rac[n]=$8;rami[n]=$9;rami6[n]=$10;rmac[n]=$11}
             END{
                 s=(n>20)?n-19:1
-                for(i=s;i<=n;i++){
+                for(i=n;i>=s;i--){
                     act=ra[i];when=rw[i];dmac=rm[i];ip4=ri4[i];ip6=ri6[i];host=rh[i]
                     actor=rac[i];amac=rmac[i];aip4=rami[i];aip6=rami6[i]
                     if(actor==""&&host!="")actor=host
