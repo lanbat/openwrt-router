@@ -110,6 +110,15 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
             >"${DENIED_FILE}.tmp" && mv "${DENIED_FILE}.tmp" "$DENIED_FILE" || true
         nft delete element inet fw4 "$_pending_set" "{ $IP }" 2>/dev/null || true
         [ -n "$IP6" ] && nft delete element inet fw4 "${NET}_join_pending6" "{ $IP6 }" 2>/dev/null || true
+        case "$IP" in
+            *:*) nft add element inet fw4 "${NET}_join_approved_ips6" "{ $IP }" 2>/dev/null || true ;;
+            *)   nft add element inet fw4 "${NET}_join_approved_ips"  "{ $IP }" 2>/dev/null || true ;;
+        esac
+        [ -n "$IP6" ] && nft add element inet fw4 "${NET}_join_approved_ips6" "{ $IP6 }" 2>/dev/null || true
+        _approved_ips_f="${BASE_DIR}/${NET}-join-approved-ips"
+        { grep -v "^${MAC} " "$_approved_ips_f" 2>/dev/null
+          printf '%s %s\n' "$MAC" "${IP4:-$IP}"; } >"${_approved_ips_f}.tmp" \
+            && mv "${_approved_ips_f}.tmp" "$_approved_ips_f" || true
         if [ "${DEVICE_CONTROL:-no}" = yes ]; then
             _lbl_f="${BASE_DIR}/${NET}-device-labels"
             { grep -v "^${MAC}	" "$_ip_store" 2>/dev/null; printf '%s\t%s\n' "$MAC" "$IP"; } \

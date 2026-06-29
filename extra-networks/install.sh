@@ -406,10 +406,19 @@ set ${IFACE}_join_pending6 {
     type ipv6_addr
 }
 
+set ${IFACE}_join_approved_ips {
+    type ipv4_addr
+}
+
+set ${IFACE}_join_approved_ips6 {
+    type ipv6_addr
+}
+
 chain ${IFACE}_join_gate {
     type filter hook forward priority -3; policy accept;
-    iifname "br-${IFACE}" ip saddr @${IFACE}_join_pending drop
-    iifname "br-${IFACE}" ip6 saddr @${IFACE}_join_pending6 drop
+    iifname "br-${IFACE}" ip saddr @${IFACE}_join_approved_ips accept
+    iifname "br-${IFACE}" ip6 saddr @${IFACE}_join_approved_ips6 accept
+    iifname "br-${IFACE}" drop
 }
 EOF
 
@@ -421,12 +430,27 @@ EOF
 BASE_DIR=/etc/extra-networks
 PENDING_FILE="\${BASE_DIR}/${IFACE}-join-pending"
 APPROVED_FILE="\${BASE_DIR}/${IFACE}-join-approved"
+APPROVED_IPS_FILE="\${BASE_DIR}/${IFACE}-join-approved-ips"
 
-[ -f "\$PENDING_FILE" ] || exit 0
-
+nft flush set inet fw4 ${IFACE}_join_approved_ips 2>/dev/null || true
+nft flush set inet fw4 ${IFACE}_join_approved_ips6 2>/dev/null || true
 nft flush set inet fw4 ${IFACE}_join_pending 2>/dev/null || true
 nft flush set inet fw4 ${IFACE}_join_pending6 2>/dev/null || true
 
+# Restore approved IPs so already-approved devices are not blocked after reboot/fw4 reload
+if [ -f "\$APPROVED_IPS_FILE" ]; then
+    while IFS=' ' read -r _mac _ip; do
+        case "\$_mac" in '#'*|'') continue ;; esac
+        grep -qF "\$_mac" "\$APPROVED_FILE" 2>/dev/null || continue
+        case "\$_ip" in
+            *:*) nft add element inet fw4 ${IFACE}_join_approved_ips6 "{ \$_ip }" 2>/dev/null || true ;;
+            *)   nft add element inet fw4 ${IFACE}_join_approved_ips  "{ \$_ip }" 2>/dev/null || true ;;
+        esac
+    done < "\$APPROVED_IPS_FILE"
+fi
+
+# Restore pending IPs for display on the status dashboard
+[ -f "\$PENDING_FILE" ] || exit 0
 while IFS= read -r _line; do
     case "\$_line" in '#'*|'') continue ;; esac
     _mac="\${_line%% *}"
@@ -555,6 +579,11 @@ for _conf in /etc/extra-networks/*-notify.conf; do
         _approved="${BASE_DIR}/${IFACE_NAME}-join-approved"
         _pending="${BASE_DIR}/${IFACE_NAME}-join-pending"
         if grep -qF "$MACADDR" "$_approved" 2>/dev/null; then
+            _approved_ips="${BASE_DIR}/${IFACE_NAME}-join-approved-ips"
+            { grep -v "^${MACADDR} " "$_approved_ips" 2>/dev/null
+              printf '%s %s\n' "$MACADDR" "$IPADDR"; } >"${_approved_ips}.tmp" \
+                && mv "${_approved_ips}.tmp" "$_approved_ips" || true
+            nft add element inet fw4 ${IFACE_NAME}_join_approved_ips "{ $IPADDR }" 2>/dev/null || true
             [ "${NOTIFY_JOIN:-no}" = yes ] && \
                 _ntfy "Device joined — $IFACE_NAME" low "" \
 "${HOSTNAME:-unknown} ($MACADDR) joined $IFACE_NAME at $IPADDR."
