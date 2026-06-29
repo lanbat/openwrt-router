@@ -98,13 +98,8 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
               printf '%s\t%s\n' "$MAC" "$_safe"; } > "${_lbl_f}.tmp" \
                 && mv "${_lbl_f}.tmp" "$_lbl_f" || true
             _slug=$(_slugify "$_safe")
-            if [ -n "$_slug" ]; then
-                _hosts_f="/etc/dnsmasq.d/${_iface}-hosts.conf"
-                { grep -v "^dhcp-host=${MAC}," "$_hosts_f" 2>/dev/null
-                  printf 'dhcp-host=%s,%s\n' "$MAC" "$_slug"; } > "${_hosts_f}.tmp" \
-                    && mv "${_hosts_f}.tmp" "$_hosts_f" || true
-                /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
-            fi
+            _write_device_dns "$_iface" "$MAC" "$_slug" \
+                "$(_ip4_for_mac "$MAC")" "$(_ip6_for_mac "$MAC")"
         fi
         printf '<meta http-equiv="refresh" content="0;url=/cgi-bin/status">'
         exit 0
@@ -161,13 +156,8 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
           printf '%s\t%s\n' "$MAC" "$_label_safe"; } > "${_lbl_f}.tmp" \
             && mv "${_lbl_f}.tmp" "$_lbl_f" || true
         _slug=$(_slugify "$_label_safe")
-        if [ -n "$_slug" ]; then
-            _hosts_f="/etc/dnsmasq.d/${_iface}-hosts.conf"
-            { grep -v "^dhcp-host=${MAC}," "$_hosts_f" 2>/dev/null
-              printf 'dhcp-host=%s,%s\n' "$MAC" "$_slug"; } > "${_hosts_f}.tmp" \
-                && mv "${_hosts_f}.tmp" "$_hosts_f" || true
-            /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
-        fi
+        _write_device_dns "$_iface" "$MAC" "$_slug" \
+            "${IP4:-$IP}" "$(_ip6_for_mac "$MAC")"
         _ntfy "Access approved — ${NET}" default white_check_mark \
 "Type: Internet access approved
 

@@ -57,6 +57,28 @@ _ntfy() {
 Dashboard: ${_ntfy_dash}" >/dev/null &
 }
 
+# Write per-device dnsmasq DNS file: dhcp-host for DHCP hostname + host-record for A/AAAA.
+# Usage: _write_device_dns iface mac slug ip4 ip6
+_write_device_dns() {
+    _wd_iface="$1" _wd_mac="$2" _wd_slug="$3" _wd_ip4="${4:-}" _wd_ip6="${5:-}"
+    [ -n "$_wd_slug" ] || return 0
+    _wd_macn=$(printf '%s' "$_wd_mac" | tr -d ':')
+    _wd_domain=$(uci -q get dhcp.@dnsmasq[0].domain 2>/dev/null || true)
+    _wd_domain="${_wd_domain:-lan}"
+    _wd_fqdn="${_wd_slug}.${_wd_domain}"
+    _wd_conf="/etc/dnsmasq.d/${_wd_iface}-dns-${_wd_macn}.conf"
+    {   printf 'dhcp-host=%s,%s\n' "$_wd_mac" "$_wd_slug"
+        if [ -n "$_wd_ip4" ] && [ -n "$_wd_ip6" ]; then
+            printf 'host-record=%s,%s,%s\n' "$_wd_fqdn" "$_wd_ip4" "$_wd_ip6"
+        elif [ -n "$_wd_ip4" ]; then
+            printf 'host-record=%s,%s\n' "$_wd_fqdn" "$_wd_ip4"
+        elif [ -n "$_wd_ip6" ]; then
+            printf 'host-record=%s,%s\n' "$_wd_fqdn" "$_wd_ip6"
+        fi
+    } > "$_wd_conf"
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+}
+
 # Slugify a label for use as a dnsmasq hostname: lowercase, non-alnum → hyphen.
 _slugify() {
     printf '%s' "$1" \

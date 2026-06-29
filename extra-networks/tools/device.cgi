@@ -113,13 +113,8 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
             mkdir -p "$BASE_DIR"
             _upsert "$_labels_f" "$MAC" "$_safe"
             _slug=$(_slugify "$_safe")
-            if [ -n "$_slug" ]; then
-                _hosts_f="/etc/dnsmasq.d/${_iface}-hosts.conf"
-                { grep -v "^dhcp-host=${MAC}," "$_hosts_f" 2>/dev/null
-                  printf 'dhcp-host=%s,%s\n' "$MAC" "$_slug"; } > "${_hosts_f}.tmp" \
-                    && mv "${_hosts_f}.tmp" "$_hosts_f" || true
-                /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
-            fi
+            _write_device_dns "$_iface" "$MAC" "$_slug" \
+                "${_DEV_IP:-$(_ip4_for_mac "$MAC")}" "${_DEV_IP6:-$(_ip6_for_mac "$MAC")}"
         fi
         printf '<meta http-equiv="refresh" content="0;url=%s">' "$(_html "$_BACK_URL")"
         exit 0
@@ -307,11 +302,8 @@ MAC: ${MAC}"
         nft delete element inet fw4 "${_iface}_join_pending"  "{ ${_DEV_IP} }"  2>/dev/null || true
         nft delete element inet fw4 "${_iface}_join_pending6" "{ ${_DEV_IP6} }" 2>/dev/null || true
         # Remove dnsmasq entries
-        _dconf="/etc/dnsmasq.d/${_iface}-device-${_mac_n}.conf"
-        rm -f "$_dconf"
-        _hosts_f="/etc/dnsmasq.d/${_iface}-hosts.conf"
-        [ -f "$_hosts_f" ] && { grep -v "^dhcp-host=${MAC}," "$_hosts_f" > "${_hosts_f}.tmp" 2>/dev/null \
-            && mv "${_hosts_f}.tmp" "$_hosts_f" || true; }
+        rm -f "/etc/dnsmasq.d/${_iface}-device-${_mac_n}.conf"
+        rm -f "/etc/dnsmasq.d/${_iface}-dns-${_mac_n}.conf"
         /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
         # Rebuild inspect chain (removes per-device nft sets and rules)
         setsid sh /etc/extra-networks/_regen-inspect.sh "$_iface" >/dev/null 2>&1 &
