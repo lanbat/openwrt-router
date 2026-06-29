@@ -95,6 +95,7 @@ if [ -z "$_DEV_HN" ]; then
     _uci_idx=$(uci show dhcp 2>/dev/null | grep -i "'${MAC}'" | grep -oE "@host\[[0-9]+\]" | head -1)
     [ -n "$_uci_idx" ] && _DEV_HN=$(uci -q get "dhcp.${_uci_idx}.name" 2>/dev/null || true)
 fi
+_DEV_DNS_DISPLAY="${_DEV_FQDN:-${_DEV_HN:+${_DEV_HN}.${_LOCAL_DOMAIN}}}"
 _BACK_URL="/cgi-bin/device?net=${NET}&mac=${MAC}"
 _JOIN_IP="${_DEV_IP:-$_DEV_IP6}"
 _JOIN_STATE=Untracked
@@ -500,7 +501,7 @@ input[type=text],input[type=number]{font-size:.875rem;padding:.3rem .5rem;
 <div class="row"><span class="lbl">Tracked IPv4</span><span class="val">${_DEV_IP:----}</span></div>
 <div class="row"><span class="lbl">Tracked IPv6</span><span class="val">${_DEV_IP6:----}</span></div>
 <div class="row"><span class="lbl">Network</span><span class="val">$(_html "$_iface")</span></div>
-<div class="row"><span class="lbl">DNS name</span><span class="val">${_DEV_FQDN:-${_DEV_HN:----}}</span></div>
+<div class="row"><span class="lbl">DNS name</span><span class="val">${_DEV_DNS_DISPLAY:----}</span></div>
 ${_approval_row}
 </div>
 
