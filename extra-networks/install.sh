@@ -401,9 +401,14 @@ set ${IFACE}_join_pending {
     type ipv4_addr
 }
 
+set ${IFACE}_join_pending6 {
+    type ipv6_addr
+}
+
 chain ${IFACE}_join_gate {
     type filter hook forward priority -3; policy accept;
     iifname "br-${IFACE}" ip saddr @${IFACE}_join_pending drop
+    iifname "br-${IFACE}" ip6 saddr @${IFACE}_join_pending6 drop
 }
 EOF
 
@@ -419,6 +424,7 @@ APPROVED_FILE="\${BASE_DIR}/${IFACE}-join-approved"
 [ -f "\$PENDING_FILE" ] || exit 0
 
 nft flush set inet fw4 ${IFACE}_join_pending 2>/dev/null || true
+nft flush set inet fw4 ${IFACE}_join_pending6 2>/dev/null || true
 
 while IFS= read -r _line; do
     case "\$_line" in '#'*|'') continue ;; esac
@@ -429,7 +435,10 @@ while IFS= read -r _line; do
             && mv "\${PENDING_FILE}.tmp" "\$PENDING_FILE" || true
         continue
     fi
-    nft add element inet fw4 ${IFACE}_join_pending "{ \$_ip }" 2>/dev/null || true
+    case "\$_ip" in
+        *:*) nft add element inet fw4 ${IFACE}_join_pending6 "{ \$_ip }" 2>/dev/null || true ;;
+        *)   nft add element inet fw4 ${IFACE}_join_pending "{ \$_ip }" 2>/dev/null || true ;;
+    esac
 done <"\$PENDING_FILE"
 EOF
     chmod 0755 /etc/hotplug.d/iface/52-${IFACE}-joingate

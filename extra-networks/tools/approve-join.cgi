@@ -62,15 +62,23 @@ printf '%s' "$MAC" | grep -qiE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' \
 _load_notify "$NET"
 [ -n "${NOTIFY_URL:-}" ] \
     || { printf '<h1>Notifications not configured for %s</h1>' "$(_html "$NET")"; exit 0; }
+_iface="${IFACE_NAME:-$NET}"
 
 APPROVED_FILE="${BASE_DIR}/${NET}-join-approved"
 PENDING_FILE="${BASE_DIR}/${NET}-join-pending"
 DENIED_FILE="${BASE_DIR}/${NET}-join-denied"
+IP6=$(ip -6 neigh show dev "br-${_iface}" 2>/dev/null \
+    | awk -v m="$MAC" '!/^fe80:/ && /lladdr/ { for(i=1;i<=NF;i++) if($i=="lladdr" && tolower($(i+1))==tolower(m)){print $1; exit} }')
+case "$IP" in
+    *:*) _pending_set="${NET}_join_pending6"; _ip_store="${BASE_DIR}/${NET}-device-ip6s" ;;
+    *)   _pending_set="${NET}_join_pending";  _ip_store="${BASE_DIR}/${NET}-device-ips" ;;
+esac
 
 _label=$([ -n "$HOST" ] && printf '%s (%s)' "$(_html "$HOST")" "$IP" || printf '%s' "$IP")
 QS="net=${NET}&ip=${IP}&mac=${MAC}&host=${HOST}"
 _dns=$(nslookup "$IP" 2>/dev/null | awk '/name =/{gsub(/\.$/,"",$NF); print $NF; exit}')
 _device_detail="IP: ${IP}
+IPv6: ${IP6:-unknown}
 DNS: ${_dns:-unknown}
 Hostname: ${HOST:-unknown}
 MAC: ${MAC}"
@@ -94,12 +102,17 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
             >"${PENDING_FILE}.tmp" && mv "${PENDING_FILE}.tmp" "$PENDING_FILE" || true
         { grep -vF "$MAC" "$DENIED_FILE" 2>/dev/null; } \
             >"${DENIED_FILE}.tmp" && mv "${DENIED_FILE}.tmp" "$DENIED_FILE" || true
-        nft delete element inet fw4 ${NET}_join_pending "{ $IP }" 2>/dev/null || true
+        nft delete element inet fw4 "$_pending_set" "{ $IP }" 2>/dev/null || true
+        [ -n "$IP6" ] && nft delete element inet fw4 "${NET}_join_pending6" "{ $IP6 }" 2>/dev/null || true
         if [ "${DEVICE_CONTROL:-no}" = yes ]; then
-            _ips_f="${BASE_DIR}/${NET}-device-ips"
             _lbl_f="${BASE_DIR}/${NET}-device-labels"
-            { grep -v "^${MAC}	" "$_ips_f" 2>/dev/null; printf '%s\t%s\n' "$MAC" "$IP"; } \
-                >"${_ips_f}.tmp" && mv "${_ips_f}.tmp" "$_ips_f" || true
+            { grep -v "^${MAC}	" "$_ip_store" 2>/dev/null; printf '%s\t%s\n' "$MAC" "$IP"; } \
+                >"${_ip_store}.tmp" && mv "${_ip_store}.tmp" "$_ip_store" || true
+            if [ -n "$IP6" ]; then
+                _ip6_store="${BASE_DIR}/${NET}-device-ip6s"
+                { grep -v "^${MAC}	" "$_ip6_store" 2>/dev/null; printf '%s\t%s\n' "$MAC" "$IP6"; } \
+                    >"${_ip6_store}.tmp" && mv "${_ip6_store}.tmp" "$_ip6_store" || true
+            fi
             grep -qF "$MAC" "$_lbl_f" 2>/dev/null \
                 || printf '%s\t%s\n' "$MAC" "$MAC" >> "$_lbl_f"
             setsid sh /etc/extra-networks/_regen-inspect.sh "$NET" >/dev/null 2>&1 &
@@ -118,9 +131,12 @@ The approved device can now use the internet on ${NET}."
     else
         { grep -vF "$MAC" "$DENIED_FILE" 2>/dev/null; printf '%s\n' "$MAC"; } \
             >"${DENIED_FILE}.tmp" && mv "${DENIED_FILE}.tmp" "$DENIED_FILE" || true
-        { grep -v "^${MAC} " "$PENDING_FILE" 2>/dev/null; printf '%s %s\n' "$MAC" "$IP"; } \
+        { grep -v "^${MAC} " "$PENDING_FILE" 2>/dev/null
+          printf '%s %s\n' "$MAC" "$IP"
+          [ -n "$IP6" ] && printf '%s %s\n' "$MAC" "$IP6"; } \
             >"${PENDING_FILE}.tmp" && mv "${PENDING_FILE}.tmp" "$PENDING_FILE" || true
-        nft add element inet fw4 ${NET}_join_pending "{ $IP }" 2>/dev/null || true
+        nft add element inet fw4 "$_pending_set" "{ $IP }" 2>/dev/null || true
+        [ -n "$IP6" ] && nft add element inet fw4 "${NET}_join_pending6" "{ $IP6 }" 2>/dev/null || true
         _ntfy "Access denied — ${NET}" default no_entry \
 "Type: Internet access denied
 

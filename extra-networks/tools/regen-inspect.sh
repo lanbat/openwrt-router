@@ -9,6 +9,7 @@ _iface="${1:-}"
 _base=/etc/extra-networks
 _labels="${_base}/${_iface}-device-labels"
 _ips="${_base}/${_iface}-device-ips"
+_ip6s="${_base}/${_iface}-device-ip6s"
 _limits="${_base}/${_iface}-device-limits"
 _rules="${_base}/${_iface}-device-rules"
 _nftd="/etc/nftables.d/25-${_iface}-inspect.nft"
@@ -43,18 +44,27 @@ printf '    iifname "br-%s" ip daddr %s tcp dport 53 accept\n' "$_iface" "$_rout
 printf '    iifname "br-%s" udp dport 53 drop\n' "$_iface"
 printf '    iifname "br-%s" tcp dport { 53, 853 } drop\n' "$_iface"
 
-if [ -f "$_labels" ] && [ -f "$_ips" ]; then
+if [ -f "$_labels" ] && { [ -f "$_ips" ] || [ -f "$_ip6s" ]; }; then
     while IFS=$(printf '\t') read -r _mac _name; do
         case "$_mac" in '#'*|'') continue ;; esac
         _mn=$(printf '%s' "$_mac" | tr -d ':')
         _ip=$(awk -v m="$_mac" 'tolower($1)==tolower(m){print $2; exit}' "$_ips" 2>/dev/null || true)
-        [ -z "$_ip" ] && continue
+        _ip6=$(awk -v m="$_mac" 'tolower($1)==tolower(m){print $2; exit}' "$_ip6s" 2>/dev/null || true)
+        [ -z "$_ip$_ip6" ] && continue
         _lim=$(awk -v m="$_mac" 'tolower($1)==tolower(m){print $2; exit}' "$_limits" 2>/dev/null || true)
         _lim="${_lim:-120}"
-        printf '    iifname "br-%s" ip saddr %s ct state new limit rate over %s/minute drop\n' \
-            "$_iface" "$_ip" "$_lim"
-        printf '    iifname "br-%s" ip saddr %s ct state new ip daddr @%s_allow_%s_4 accept\n' \
-            "$_iface" "$_ip" "$_iface" "$_mn"
+        if [ -n "$_ip" ]; then
+            printf '    iifname "br-%s" ip saddr %s ct state new limit rate over %s/minute drop\n' \
+                "$_iface" "$_ip" "$_lim"
+            printf '    iifname "br-%s" ip saddr %s ct state new ip daddr @%s_allow_%s_4 accept\n' \
+                "$_iface" "$_ip" "$_iface" "$_mn"
+        fi
+        if [ -n "$_ip6" ]; then
+            printf '    iifname "br-%s" ip6 saddr %s ct state new limit rate over %s/minute drop\n' \
+                "$_iface" "$_ip6" "$_lim"
+            printf '    iifname "br-%s" ip6 saddr %s ct state new ip6 daddr @%s_allow_%s_6 accept\n' \
+                "$_iface" "$_ip6" "$_iface" "$_mn"
+        fi
     done < "$_labels"
 fi
 
@@ -71,9 +81,11 @@ fw4 -q reload 2>/dev/null || true
 if [ -f "$_rules" ]; then
     while IFS=$(printf '\t') read -r _mac _dst _action _port _proto; do
         case "$_mac" in '#'*|'') continue ;; esac
-        case "$_dst" in *.*.*.*) ;; *) continue ;; esac
         [ "${_action:-}" = allow ] || continue
         _mn=$(printf '%s' "$_mac" | tr -d ':')
-        nft add element inet fw4 "${_iface}_allow_${_mn}_4" "{ $_dst }" 2>/dev/null || true
+        case "$_dst" in
+            *.*.*.*) nft add element inet fw4 "${_iface}_allow_${_mn}_4" "{ $_dst }" 2>/dev/null || true ;;
+            *:*)     nft add element inet fw4 "${_iface}_allow_${_mn}_6" "{ $_dst }" 2>/dev/null || true ;;
+        esac
     done < "$_rules"
 fi

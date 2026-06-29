@@ -243,9 +243,6 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
     _up=no; ip link show "br-${_iface}" 2>/dev/null | grep -q "LOWER_UP" && _up=yes
     _rx=$(_nft_bytes "${_iface}_counter" in);  _rxh=$(_human "$_rx")
     _tx=$(_nft_bytes "${_iface}_counter" out); _txh=$(_human "$_tx")
-    _devs=$(awk -v s="${SUBNET}." '$3~s{print $4"\t"$3"\t"$2"\t"$1}' /tmp/dhcp.leases 2>/dev/null)
-    _dc=$(printf '%s\n' "$_devs" | awk 'NF{c++}END{print c+0}')
-
     # WiFi interface for signal strength (e.g. phy0-ap1 for br-guest)
     _wlan=$(ip link show master "br-${_iface}" 2>/dev/null \
         | awk 'NR==1{n=$2; sub(/@.*/,"",n); print n}')
@@ -254,6 +251,16 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
     # IPv6 neighbour table for this bridge: MAC → global/ULA address (skip link-local)
     _neigh6=$(ip -6 neigh show dev "br-${_iface}" 2>/dev/null \
         | awk '!/^fe80:/ && /lladdr/{for(i=1;i<=NF;i++) if($i=="lladdr"){print $(i+1)"\t"$1; break}}')
+
+    _devs=$(
+        awk -v s="${SUBNET}." '$3~s{print $4"\t"$3"\t"$2"\t"$1}' /tmp/dhcp.leases 2>/dev/null
+        printf '%s\n' "$_neigh6" | while IFS=$(printf '\t') read -r _nmac _nip6; do
+            [ -n "$_nmac" ] || continue
+            awk -v m="$_nmac" 'tolower($2)==tolower(m){found=1} END{exit found?0:1}' /tmp/dhcp.leases 2>/dev/null \
+                || printf '*\t-\t%s\t0\n' "$_nmac"
+        done
+    )
+    _dc=$(printf '%s\n' "$_devs" | awk 'NF{c++}END{print c+0}')
 
     # ── Network header + config card ──────────────────────────────────────────
 
@@ -364,7 +371,8 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
             fi
 
             _hn_disp="—"; [ "$_hn" != "*" ] && [ -n "$_hn" ] && _hn_disp="$(_html "$_hn")"
-            _dns=$(nslookup "$_ip" 2>/dev/null \
+            _lookup_ip="$_ip"; [ "$_lookup_ip" = "-" ] && _lookup_ip="$_ipv6"
+            _dns=$(nslookup "$_lookup_ip" 2>/dev/null \
                 | awk '/name =/{gsub(/\.$/,"",$NF); print $NF; exit}')
             [ -z "$_dns" ] && _dns="—"
             _joined=$(awk -F'\t' -v m="$_mac" \
@@ -372,7 +380,7 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
                 /tmp/extra-networks-joins 2>/dev/null || true)
             [ -z "$_joined" ] && _joined="—"
             printf '<tr><td>%s</td><td class="dim">%s</td><td>%s</td><td class="dim">%s</td>' \
-                "$_hn_disp" "$(_html "$_dns")" "$_ip" "$_joined"
+                "$_hn_disp" "$(_html "$_dns")" "$([ "$_ip" = "-" ] && echo "—" || _html "$_ip")" "$_joined"
             [ "$_hdr_ip6" = yes ] && printf '<td class="dim">%s</td>' "${_ipv6:----}"
             if [ "${JOIN_APPROVAL:-no}" = yes ]; then
                 _join_state="Untracked"
@@ -383,16 +391,18 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
                 printf '<td><span class="badge badge-%s">%s</span><span class="actions">' "$_join_class" "$_join_state"
                 if [ "$_join_state" != Approved ]; then
                     _jhost=$([ "$_hn" != "*" ] && printf '%s' "$_hn" || true)
+                    _approve_ip="$_ip"; [ "$_approve_ip" = "-" ] && _approve_ip="$_ipv6"
                     printf '<form method="POST" action="/cgi-bin/approve-join">'
                     printf '<input type="hidden" name="net" value="%s"><input type="hidden" name="ip" value="%s"><input type="hidden" name="mac" value="%s"><input type="hidden" name="host" value="%s"><input type="hidden" name="action" value="approve">' \
-                        "$(_html "$_iface")" "$(_html "$_ip")" "$(_html "$_mac")" "$(_html "$_jhost")"
+                        "$(_html "$_iface")" "$(_html "$_approve_ip")" "$(_html "$_mac")" "$(_html "$_jhost")"
                     printf '<button class="btn-ok" type="submit">Approve</button></form>'
                 fi
                 if [ "$_join_state" != Approved ] && [ "$_join_state" != Denied ]; then
                     _jhost=$([ "$_hn" != "*" ] && printf '%s' "$_hn" || true)
+                    _approve_ip="$_ip"; [ "$_approve_ip" = "-" ] && _approve_ip="$_ipv6"
                     printf '<form method="POST" action="/cgi-bin/approve-join">'
                     printf '<input type="hidden" name="net" value="%s"><input type="hidden" name="ip" value="%s"><input type="hidden" name="mac" value="%s"><input type="hidden" name="host" value="%s"><input type="hidden" name="action" value="deny">' \
-                        "$(_html "$_iface")" "$(_html "$_ip")" "$(_html "$_mac")" "$(_html "$_jhost")"
+                        "$(_html "$_iface")" "$(_html "$_approve_ip")" "$(_html "$_mac")" "$(_html "$_jhost")"
                     printf '<button class="btn-deny" type="submit">Deny</button></form>'
                 fi
                 printf '</span></td>'
@@ -405,7 +415,7 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
                 "$(_html "${_dlabel:-$_mac}")"
             [ "$_hdr_sig" = yes ] && printf '<td>%s</td>' "${_sig:----}"
             [ "$_hdr_bw"  = yes ] && printf '<td>%s</td>' "${_bw:----}"
-            printf '<td>%s</td></tr>\n' "$(_exp_str "$_exp_ts")"
+            printf '<td>%s</td></tr>\n' "$([ "${_exp_ts:-0}" -gt 0 ] 2>/dev/null && _exp_str "$_exp_ts" || echo "—")"
         done
         printf '</table>\n'
     fi

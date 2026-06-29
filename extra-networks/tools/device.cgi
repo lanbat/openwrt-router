@@ -63,6 +63,7 @@ _mac_n=$(printf '%s' "$MAC" | tr -d ':')
 
 _labels_f="${BASE_DIR}/${_iface}-device-labels"
 _ips_f="${BASE_DIR}/${_iface}-device-ips"
+_ip6s_f="${BASE_DIR}/${_iface}-device-ip6s"
 _limits_f="${BASE_DIR}/${_iface}-device-limits"
 _rules_f="${BASE_DIR}/${_iface}-device-rules"
 _pending_f="${BASE_DIR}/${_iface}-pending-${_mac_n}"
@@ -74,6 +75,10 @@ _DEV_LABEL=$(awk -v m="$MAC" 'tolower($1)==tolower(m){sub(/^[^\t]+\t/,""); print
     "$_labels_f" 2>/dev/null || true)
 _DEV_IP=$(awk -v m="$MAC" 'tolower($1)==tolower(m){print $2; exit}' \
     "$_ips_f" 2>/dev/null || true)
+_DEV_IP6=$(awk -v m="$MAC" 'tolower($1)==tolower(m){print $2; exit}' \
+    "$_ip6s_f" 2>/dev/null || true)
+[ -n "$_DEV_IP6" ] || _DEV_IP6=$(ip -6 neigh show dev "br-${_iface}" 2>/dev/null \
+    | awk -v m="$MAC" '!/^fe80:/ && /lladdr/ { for(i=1;i<=NF;i++) if($i=="lladdr" && tolower($(i+1))==tolower(m)){print $1; exit} }')
 _DEV_LIMIT=$(awk -v m="$MAC" 'tolower($1)==tolower(m){print $2; exit}' \
     "$_limits_f" 2>/dev/null || true)
 _DEV_LIMIT="${_DEV_LIMIT:-120}"
@@ -115,8 +120,10 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
         _approver="${_approver_name:-$_approver_ip}"
         [ "$_approver" = "*" ] && _approver="$_approver_ip"
         [ -n "$_approver_mac" ] && _approver="${_approver}, MAC: ${_approver_mac}"
-        _dns=$([ -n "$_DEV_IP" ] && nslookup "$_DEV_IP" 2>/dev/null | awk '/name =/{gsub(/\.$/,"",$NF); print $NF; exit}' || true)
-        _device_detail="IP: ${_DEV_IP:-unknown}
+        _notify_ip="${_DEV_IP:-${_DEV_IP6:-}}"
+        _dns=$([ -n "$_notify_ip" ] && nslookup "$_notify_ip" 2>/dev/null | awk '/name =/{gsub(/\.$/,"",$NF); print $NF; exit}' || true)
+        _device_detail="IPv4: ${_DEV_IP:-unknown}
+IPv6: ${_DEV_IP6:-unknown}
 DNS: ${_dns:-unknown}
 Hostname: ${_DEV_LABEL:-unknown}
 MAC: ${MAC}"
@@ -124,14 +131,15 @@ MAC: ${MAC}"
             grep -vixF "$MAC" "$_join_approved_f" > "${_join_approved_f}.tmp" 2>/dev/null \
                 && mv "${_join_approved_f}.tmp" "$_join_approved_f" || true
         }
-        if [ -n "$_DEV_IP" ]; then
-            { grep -vi "^${MAC} " "$_join_pending_f" 2>/dev/null; printf '%s %s\n' "$MAC" "$_DEV_IP"; } \
-                > "${_join_pending_f}.tmp" && mv "${_join_pending_f}.tmp" "$_join_pending_f" || true
-            nft add element inet fw4 "${_iface}_join_pending" "{ ${_DEV_IP} }" 2>/dev/null || true
-        fi
+        { grep -vi "^${MAC} " "$_join_pending_f" 2>/dev/null
+          [ -n "$_DEV_IP" ] && printf '%s %s\n' "$MAC" "$_DEV_IP"
+          [ -n "$_DEV_IP6" ] && printf '%s %s\n' "$MAC" "$_DEV_IP6"; } \
+            > "${_join_pending_f}.tmp" && mv "${_join_pending_f}.tmp" "$_join_pending_f" || true
+        [ -n "$_DEV_IP" ] && nft add element inet fw4 "${_iface}_join_pending" "{ ${_DEV_IP} }" 2>/dev/null || true
+        [ -n "$_DEV_IP6" ] && nft add element inet fw4 "${_iface}_join_pending6" "{ ${_DEV_IP6} }" 2>/dev/null || true
         { grep -vixF "$MAC" "$_join_denied_f" 2>/dev/null; } \
             > "${_join_denied_f}.tmp" && mv "${_join_denied_f}.tmp" "$_join_denied_f" || true
-        _join_history_add "$_iface" revoked "$MAC" "${_DEV_IP:-unknown}" "${_DEV_LABEL:-${_dns:-unknown}}" "$_approver" "${JOIN_HISTORY_RETENTION:-90d}"
+        _join_history_add "$_iface" revoked "$MAC" "${_DEV_IP:-${_DEV_IP6:-unknown}}" "${_DEV_LABEL:-${_dns:-unknown}}" "$_approver" "${JOIN_HISTORY_RETENTION:-90d}"
         _ntfy "Access revoked — ${_iface}" default no_entry \
 "Type: Internet access revoked
 
@@ -177,7 +185,10 @@ The device is no longer approved on ${_iface}."
         _entry="${MAC}	${_dip}	allow	${_dpt}	${_dpr}"
         grep -qF "$_entry" "$_rules_f" 2>/dev/null \
             || printf '%s\n' "$_entry" >> "$_rules_f"
-        nft add element inet fw4 "${_iface}_allow_${_mac_n}_4" "{ ${_dip} }" 2>/dev/null || true
+        case "$_dip" in
+            *:*) nft add element inet fw4 "${_iface}_allow_${_mac_n}_6" "{ ${_dip} }" 2>/dev/null || true ;;
+            *)   nft add element inet fw4 "${_iface}_allow_${_mac_n}_4" "{ ${_dip} }" 2>/dev/null || true ;;
+        esac
         [ -f "$_pending_f" ] && {
             grep -v "^${_dip}	${_dpt}	${_dpr}	" "$_pending_f" \
                 > "${_pending_f}.tmp" 2>/dev/null \
@@ -217,6 +228,10 @@ The device is no longer approved on ${_iface}."
                 nft delete element inet fw4 "${_iface}_allow_${_mac_n}_4" \
                     "{ ${_dst} }" 2>/dev/null || true
                 ;;
+            *:*)
+                nft delete element inet fw4 "${_iface}_allow_${_mac_n}_6" \
+                    "{ ${_dst} }" 2>/dev/null || true
+                ;;
             *)
                 _dconf="/etc/dnsmasq.d/${_iface}-device-${_mac_n}.conf"
                 [ -f "$_dconf" ] && {
@@ -238,10 +253,10 @@ fi
 # ── GET: render page ──────────────────────────────────────────────────────────
 
 # Scrape logread for new pending connections from this device
-if [ -n "$_DEV_IP" ]; then
+if [ -n "$_DEV_IP$_DEV_IP6" ]; then
     _now_ts=$(date +%s)
     logread 2>/dev/null \
-    | awk -v ip="$_DEV_IP" -v iface="$_iface" \
+    | awk -v ip="$_DEV_IP" -v ip6="$_DEV_IP6" -v iface="$_iface" \
         'index($0, "EXTNET-" iface "-NEW:") {
             src=""; dst=""; dpt=""; proto=""
             for(i=1;i<=NF;i++){
@@ -250,7 +265,7 @@ if [ -n "$_DEV_IP" ]; then
                 if($i~/^DPT=/) { sub(/^DPT=/,"",$i); dpt=$i }
                 if($i~/^PROTO=/) { sub(/^PROTO=/,"",$i); proto=tolower($i) }
             }
-            if(src==ip && dst && dpt && proto) print dst"\t"dpt"\t"proto
+            if((src==ip || src==ip6) && dst && dpt && proto) print dst"\t"dpt"\t"proto
         }' \
     | sort -u -t "$(printf '\t')" -k1,3 \
     | while IFS=$(printf '\t') read -r _dst _dpt _proto; do
@@ -369,7 +384,8 @@ input[type=text],input[type=number]{font-size:.875rem;padding:.3rem .5rem;
 <h2>Device</h2>
 <div class="card">
 <div class="row"><span class="lbl">MAC</span><span class="val">$(_html "$MAC")</span></div>
-<div class="row"><span class="lbl">Tracked IP</span><span class="val">${_DEV_IP:----}</span></div>
+<div class="row"><span class="lbl">Tracked IPv4</span><span class="val">${_DEV_IP:----}</span></div>
+<div class="row"><span class="lbl">Tracked IPv6</span><span class="val">${_DEV_IP6:----}</span></div>
 <div class="row"><span class="lbl">Network</span><span class="val">$(_html "$_iface")</span></div>
 <div class="row"><span class="lbl">Join approval</span><span class="val $([ "$_is_approved" = yes ] && echo ok || echo warn)">$([ "$_is_approved" = yes ] && echo Approved || echo Pending)</span></div>
 ${_approval_row}
