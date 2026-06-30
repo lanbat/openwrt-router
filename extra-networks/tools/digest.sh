@@ -66,7 +66,7 @@ if [ -n "${GCAL_URL:-}" ]; then
             ev && /^SUMMARY:/ { sm=substr($0,9); gsub(/\\,/,",",sm); gsub(/\\n/," ",sm) }
             ')
         if [ -n "$_events" ]; then
-            _cal_section=$(printf '\nTomorrow (%s):\n%s' \
+            _cal_section=$(printf '\n\nTomorrow (%s):\n%s' \
                 "$_tomorrow_lbl" \
                 "$(printf '%s\n' "$_events" | awk '{print "• "$0}')")
         fi
@@ -105,14 +105,16 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
     _rules=$(uci show firewall 2>/dev/null \
         | grep -c "^firewall\.allow_lan_${_iface}" || echo 0)
 
-    _body="Type: Daily digest
+    _dc_str=$([ "${_dc:-0}" = 1 ] && echo "1 device" || echo "${_dc:-0} devices")
+    _rules_str=$([ "${_rules:-0}" = 1 ] && echo "1 LAN rule" || echo "${_rules:-0} LAN rules")
 
-${hostname} — $(date '+%a %d %b %Y')${_vpn_line:+
+    _body="${hostname} — $(date '+%a %d %b %Y')${_vpn_line:+
 ${_vpn_line}}
 
-${_iface}: $_dc device(s) connected
+${_iface} — ${_dc_str}
   ↓ $(_human "$_rx")  ↑ $(_human "$_tx")
-  ${_rules} active LAN access rule(s)${_cal_section}
+  ${_rules_str}${_cal_section}
+
 Dashboard: ${_dashboard_url}"
 
     case " $seen_urls " in *" $NOTIFY_URL "*) ;;

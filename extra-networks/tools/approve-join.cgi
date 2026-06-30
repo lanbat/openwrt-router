@@ -126,6 +126,11 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
         _label_new=$(printf '%s' "$(_get_param "$_params" label)" \
             | sed 's/+/ /g;s/^[[:space:]]*//;s/[[:space:]]*$//' | head -c 40)
         _label_safe=$(printf '%s' "$_label_new" | sed "s/[^a-zA-Z0-9 _.'-]//g")
+        if [ -z "$_label_safe" ]; then
+            _label_safe=$(awk -v m="$MAC" \
+                'tolower($1)==tolower(m){sub(/^[^\t]+\t/,""); print; exit}' \
+                "${BASE_DIR}/${NET}-device-labels" 2>/dev/null || true)
+        fi
         [ -n "$_label_safe" ] || { printf '<h1>Label is required to approve a device</h1>'; exit 0; }
         { grep -vF "$MAC" "$APPROVED_FILE" 2>/dev/null; printf '%s\n' "$MAC"; } \
             >"${APPROVED_FILE}.tmp" && mv "${APPROVED_FILE}.tmp" "$APPROVED_FILE" || true
