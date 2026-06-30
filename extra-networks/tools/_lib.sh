@@ -126,8 +126,9 @@ _join_history_prune() {
     _secs=$(_duration_secs "${2:-90d}")
     [ "$_secs" -gt 0 ] 2>/dev/null || { : > "$_hist"; return 0; }
     _cut=$(( $(date +%s) - _secs ))
-    awk -F '\t' -v cut="$_cut" '$1 >= cut' "$_hist" > "${_hist}.tmp" \
-        && mv "${_hist}.tmp" "$_hist" || true
+    _htmp="${_hist}.${$}.tmp"
+    awk -F '\t' -v cut="$_cut" '$1 >= cut' "$_hist" > "$_htmp" \
+        && mv "$_htmp" "$_hist" || { rm -f "$_htmp"; true; }
 }
 
 # Append a join approval decision:
