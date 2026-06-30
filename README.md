@@ -1,6 +1,6 @@
 # openwrt-router
 
-Two cooperating tools for OpenWrt routers, managed from a single repo.
+Two cooperating toolkits for OpenWrt routers, managed from a single repo: one segments your WiFi into isolated trust zones with approval workflows and live monitoring, the other selectively routes traffic through a VPN by domain or category instead of tunneling everything.
 
 ## Sub-projects
 

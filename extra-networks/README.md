@@ -1,6 +1,6 @@
 # openwrt-extra-networks
 
-Manage multiple isolated WiFi networks on OpenWrt from a single script. Each network gets its own subnet, firewall zone, DNS policy, and rate limit — deployed in seconds, no LuCI needed.
+Manage isolated WiFi networks on OpenWrt — IoT, guest, untrusted — with a single parameterized install script. Each network gets its own subnet, firewall zone, DNS policy, and rate limit, plus optional push-notified join approval, per-device outbound access control, scheduled access windows, password rotation, and a live web dashboard — deployed in seconds, no LuCI needed.
 
 Built for households that need more than one level of trust: your own devices, IoT gadgets that shouldn't touch anything, and guests who just need internet.
 
