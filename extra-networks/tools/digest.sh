@@ -28,6 +28,45 @@ _dashboard_url="http://${_router_ip:-192.168.1.1}/cgi-bin/status"
 
 hostname=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo router)
 
+# ── Google Calendar: events tomorrow ──────────────────────────────────────────
+
+_cal_section=""
+unset GCAL_URL GCAL_TZ_OFFSET
+[ -f "${BASE_DIR}/config" ] && . "${BASE_DIR}/config"
+
+if [ -n "${GCAL_URL:-}" ]; then
+    _tomorrow_ts=$(( $(date +%s) + 86400 ))
+    _tomorrow_ymd=$(awk -v ts="$_tomorrow_ts" 'BEGIN{print strftime("%Y%m%d",ts)}')
+    _tomorrow_lbl=$(awk -v ts="$_tomorrow_ts" 'BEGIN{print strftime("%a %d %b",ts)}')
+    _tz=${GCAL_TZ_OFFSET:-0}
+
+    _ics=$(curl -sf --max-time 15 "$GCAL_URL" 2>/dev/null)
+    if [ -n "$_ics" ]; then
+        _events=$(printf '%s\n' "$_ics" | tr -d '\r' | \
+            awk 'BEGIN{line=""} substr($0,1,1)==" "||substr($0,1,1)=="\t"{line=line substr($0,2);next} {if(line!="")print line; line=$0} END{if(line!="")print line}' | \
+            awk -v t="$_tomorrow_ymd" -v tz="$_tz" '
+            function fmt(dt,   h,m) {
+                if (length(dt) < 13) return "all day"
+                h = substr(dt,10,2)+0; m = substr(dt,12,2)+0
+                if (substr(dt,length(dt),1)=="Z") h = (h+tz%24+24)%24
+                return sprintf("%02d:%02d",h,m)
+            }
+            /^BEGIN:VEVENT/ { in=1; dt=""; sm="" }
+            /^END:VEVENT/   {
+                if (in && sm!="" && substr(dt,1,8)==t) print sm " (" fmt(dt) ")"
+                in=0
+            }
+            in && /^DTSTART/ { n=split($0,a,":"); dt=a[n]; gsub(/[^0-9TZ]/,"",dt) }
+            in && /^SUMMARY:/ { sm=substr($0,9); gsub(/\\,/,",",sm); gsub(/\\n/," ",sm) }
+            ')
+        if [ -n "$_events" ]; then
+            _cal_section=$(printf '\nTomorrow (%s):\n%s' \
+                "$_tomorrow_lbl" \
+                "$(printf '%s\n' "$_events" | awk '{print "• "$0}')")
+        fi
+    fi
+fi
+
 # VPN status line
 VPN_CFG=/etc/split-routing/config
 _vpn_line=""
@@ -67,7 +106,7 @@ ${_vpn_line}}
 
 ${_iface}: $_dc device(s) connected
   ↓ $(_human "$_rx")  ↑ $(_human "$_tx")
-  ${_rules} active LAN access rule(s)
+  ${_rules} active LAN access rule(s)${_cal_section}
 Dashboard: ${_dashboard_url}"
 
     case " $seen_urls " in *" $NOTIFY_URL "*) ;;
