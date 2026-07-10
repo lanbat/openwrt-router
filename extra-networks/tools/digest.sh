@@ -25,10 +25,21 @@ _human() {
 
 _router_ip=$(ip addr show br-lan 2>/dev/null | awk '/inet / { split($2,a,"/"); print a[1]; exit }')
 _dashboard_url="http://${_router_ip:-192.168.1.1}/cgi-bin/status"
-
 hostname=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo router)
 
-# ── Google Calendar: events tomorrow ──────────────────────────────────────────
+# ── System health ─────────────────────────────────────────────────────────────
+
+_up=$(awk '{print $1}' /proc/uptime 2>/dev/null)
+_up_str=$(awk -v s="${_up:-0}" 'BEGIN{
+    d=int(s/86400); h=int((s%86400)/3600)
+    if(d>0) printf "%dd %dh",d,h; else printf "%dh",h
+}')
+_load=$(awk '{print $1}' /proc/loadavg 2>/dev/null)
+_mem_pct=$(awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf "%.0f",(t-a)*100/t}' \
+           /proc/meminfo 2>/dev/null)
+_sys_line="System: up ${_up_str}, load ${_load:-?}, mem ${_mem_pct:-?}% used"
+
+# ── Google Calendar: events in next 7 days ────────────────────────────────────
 
 _cal_section=""
 unset GCAL_URL GCAL_TZ_OFFSET
@@ -59,12 +70,8 @@ if [ -n "${GCAL_URL:-}" ]; then
             }
             function tparts(dt,   h,m) {
                 if (length(dt) < 13) return "0000\tall day"
-                h = substr(dt,10,2)+0; m = substr(dt,12,2)+0
-                if (substr(dt,length(dt),1)=="Z") {
-                    h = h + tz
-                    if (h >= 24) h = h - 24
-                    if (h < 0)  h = h + 24
-                }
+                h=substr(dt,10,2)+0; m=substr(dt,12,2)+0
+                if(substr(dt,length(dt),1)=="Z"){h=h+tz;if(h>=24)h-=24;if(h<0)h+=24}
                 return sprintf("%02d%02d\t%02d:%02d",h,m,h,m)
             }
             /^BEGIN:VEVENT/ { ev=1; dt=""; sm=""; rrule="" }
@@ -104,7 +111,8 @@ if [ -n "${GCAL_URL:-}" ]; then
     fi
 fi
 
-# VPN status lines (one per vpn-*.conf tier)
+# ── VPN status ────────────────────────────────────────────────────────────────
+
 _vpn_section=""
 for _vpnconf in /etc/split-routing/vpn-*.conf; do
     [ -f "$_vpnconf" ] || continue
@@ -114,14 +122,101 @@ for _vpnconf in /etc/split-routing/vpn-*.conf; do
     _if_up=no; ip link show "$VPN_IFACE" 2>/dev/null | grep -q "LOWER_UP" && _if_up=yes
     _rule=no;  ip rule show 2>/dev/null | grep -q "lookup ${ROUTE_TABLE:-}" && _rule=yes
     _rt=no;    ip route show table "${ROUTE_TABLE:-}" 2>/dev/null | grep -q "^default" && _rt=yes
-    if [ "$_if_up$_rule$_rt" = yesyesyes ]; then
-        _vpn_line="VPN (${VPN_IFACE}): up"
-    else
-        _vpn_line="VPN (${VPN_IFACE}): DOWN"
-    fi
+    [ "$_if_up$_rule$_rt" = yesyesyes ] && _st=up || _st=DOWN
     _vpn_section="${_vpn_section:+${_vpn_section}
-}${_vpn_line}"
+}VPN (${VPN_IFACE}): ${_st}"
 done
+
+# ── Routing set sizes ─────────────────────────────────────────────────────────
+
+_sets_section=""
+if [ -d /etc/split-routing ]; then
+    _sets_body=""
+    for _conf in /etc/split-routing/vpn-*.conf; do
+        [ -f "$_conf" ] || continue
+        _tier=$(basename "$_conf" .conf | sed 's/^vpn-//')
+        unset VPN_IFACE DNS_CATS RESOLVE_CATS
+        . "$_conf"
+        for _c in ${DNS_CATS:-}; do
+            _n=$(nft list set inet fw4 "dns_${_tier}_${_c}4" 2>/dev/null \
+                 | grep -c 'expires' || echo 0)
+            _sets_body="${_sets_body:+${_sets_body}
+}  dns_${_tier}_${_c}: ${_n}"
+        done
+        for _c in ${RESOLVE_CATS:-}; do
+            _n=$(nft list set inet fw4 "resolve_${_tier}_${_c}4" 2>/dev/null \
+                 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | wc -l | tr -d ' ')
+            _sets_body="${_sets_body:+${_sets_body}
+}  resolve_${_tier}_${_c}: ${_n}"
+        done
+    done
+    _log_ts=$(stat -c %Y /tmp/routing-sets.log 2>/dev/null || echo 0)
+    _log_age=""
+    [ "${_log_ts:-0}" -gt 0 ] && \
+        _log_age=" (last refresh $(( ($(date +%s) - _log_ts) / 3600 ))h ago)"
+    [ -n "$_sets_body" ] && _sets_section="Routing sets${_log_age}:
+${_sets_body}"
+fi
+
+# ── WireGuard server peer activity ────────────────────────────────────────────
+
+_wg_section=""
+for _wg_if in $(wg show interfaces 2>/dev/null); do
+    _has_ep=$(wg show "$_wg_if" endpoints 2>/dev/null \
+              | awk '$2!="(none)"{c++}END{print c+0}')
+    [ "${_has_ep:-0}" -gt 0 ] && continue
+    _now=$(date +%s); _total=0; _active=0
+    while IFS=$(printf '\t') read -r _pub _pre _ep _al _hs _rx _tx _ka; do
+        _total=$(( _total + 1 ))
+        [ "${_hs:-0}" -gt 0 ] && [ $(( _now - _hs )) -lt 86400 ] && \
+            _active=$(( _active + 1 ))
+    done <<WGEOF
+$(wg show "$_wg_if" dump 2>/dev/null | tail -n +2)
+WGEOF
+    [ "$_total" -gt 0 ] && _wg_section="${_wg_section:+${_wg_section}
+}WireGuard (${_wg_if}): ${_active}/${_total} peers active in last 24h"
+done
+
+# ── Blocked access log counts since boot ─────────────────────────────────────
+
+_log_lines=$(logread 2>/dev/null)
+_lan_reqs=$(printf '%s\n' "$_log_lines" | grep -c 'EXTNET-2LAN' || echo 0)
+_deny=$(printf '%s\n' "$_log_lines" | grep -c 'EXTNET-DENY' || echo 0)
+unset _log_lines
+_activity_line="${_lan_reqs:-0} LAN requests, ${_deny:-0} rejections since boot"
+
+# ── Access rules expiring today or tomorrow ───────────────────────────────────
+
+_today_d=$(date +%d)
+_today_m=$(date +%m)
+_tmrw_d=$(awk -v s="$(date +%s)" 'BEGIN{print strftime("%d",s+86400)}')
+_tmrw_m=$(awk -v s="$(date +%s)" 'BEGIN{print strftime("%m",s+86400)}')
+_expiry_tmp=$(mktemp)
+crontab -l 2>/dev/null | grep 'allow-service.sh remove' | while IFS= read -r _cline; do
+    _cmin=$(printf  '%s' "$_cline" | awk '{print $1}')
+    _chour=$(printf '%s' "$_cline" | awk '{print $2}')
+    _cday=$(printf  '%s' "$_cline" | awk '{printf "%02d",$3}')
+    _cmon=$(printf  '%s' "$_cline" | awk '{printf "%02d",$4}')
+    _rname=$(printf '%s' "$_cline" | sed 's/.*# //')
+    if [ "$_cday" = "$_today_d" ] && [ "$_cmon" = "$_today_m" ]; then
+        _when="today at $(printf '%02d:%02d' "$_chour" "$_cmin")"
+    elif [ "$_cday" = "$_tmrw_d" ] && [ "$_cmon" = "$_tmrw_m" ]; then
+        _when="tomorrow at $(printf '%02d:%02d' "$_chour" "$_cmin")"
+    else
+        continue
+    fi
+    _dst=$(uci -q get firewall."$_rname".dest_ip   2>/dev/null || echo "?")
+    _port=$(uci -q get firewall."$_rname".dest_port 2>/dev/null || echo "?")
+    _proto=$(uci -q get firewall."$_rname".proto    2>/dev/null || echo "?")
+    printf '  • %s:%s/%s — %s\n' "$_dst" "$_port" "$_proto" "$_when"
+done > "$_expiry_tmp"
+_expiry_section=""
+[ -s "$_expiry_tmp" ] && _expiry_section="
+Expiring soon:
+$(cat "$_expiry_tmp")"
+rm -f "$_expiry_tmp"
+
+# ── Per-network digest ────────────────────────────────────────────────────────
 
 seen_urls=""
 for _conf in "${BASE_DIR}"/*-notify.conf; do
@@ -129,7 +224,6 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
     unset NOTIFY_URL SUBNET IFACE_NAME BANDWIDTH_THRESHOLD_MB
     . "$_conf"
     [ -z "${NOTIFY_URL:-}" ] && continue
-
     _iface="$IFACE_NAME"
     [ -z "$_iface" ] && continue
 
@@ -142,11 +236,17 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
     _dc_str=$([ "${_dc:-0}" = 1 ] && echo "1 device" || echo "${_dc:-0} devices")
     _rules_str=$([ "${_rules:-0}" = 1 ] && echo "1 LAN rule" || echo "${_rules:-0} LAN rules")
 
-    _body="${_vpn_section:+${_vpn_section}
+    _body="${_sys_line}
+
+${_vpn_section:+${_vpn_section}
+
+}${_sets_section:+${_sets_section}
+
+}${_wg_section:+${_wg_section}
 
 }${_iface} — ${_dc_str}
   ↓ $(_human "$_rx")  ↑ $(_human "$_tx")
-  ${_rules_str}${_cal_section}
+  ${_rules_str} | ${_activity_line}${_expiry_section}${_cal_section}
 
 Dashboard: ${_dashboard_url}"
 

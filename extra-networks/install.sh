@@ -644,6 +644,7 @@ NOTIFYEOF
     _cron_set extra-networks-digest   "0 8 * * * sh ${SCRIPT_DIR}/tools/digest.sh"
     _cron_set extra-networks-bwcheck  "0 * * * * sh ${SCRIPT_DIR}/tools/bandwidth-check.sh"
     _cron_set extra-networks-vpncheck "*/5 * * * * sh ${SCRIPT_DIR}/tools/check-vpn.sh"
+    _cron_set extra-networks-wancheck "*/5 * * * * sh ${SCRIPT_DIR}/tools/check-wan.sh"
 else
     # Remove crons only if no remaining network has NOTIFY_URL configured
     if ! grep -qE 'NOTIFY_URL=.+' "${BASE_DIR}/"*-notify.conf 2>/dev/null; then

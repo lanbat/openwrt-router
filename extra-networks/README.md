@@ -191,7 +191,7 @@ All notifications include a link to the status dashboard. LAN access requests in
 | Port forwarded | `expose-port.sh` adds a redirect | Default |
 | Port forward removed | Rule expired or `unexpose-port.sh` called | Low |
 | Password rotated | `rotate-password.sh` generates a new key | Default |
-| Daily digest | Traffic totals and device counts, sent at 08:00 | Low |
+| Daily digest | System health, VPN/routing set status, WG peers, traffic, blocked counts, expiring rules, calendar | Low |
 | Router reboot | Router comes back online (30s delay) | Low |
 | VPN state change | VPN goes down or recovers | High / Default |
 
@@ -271,16 +271,29 @@ When a device is labeled — either at approval time or later via the device pag
 
 ### Daily digest
 
-Sent every morning at 08:00 with traffic totals (↓/↑), connected device count, and active LAN access rule count for each network. Also includes VPN status if split-routing is configured.
+Sent every morning at 08:00. Includes:
 
-Optionally includes upcoming Google Calendar events for the next 7 days. Set in `/etc/extra-networks/config`:
+- **System health** — uptime, 1-min load average, memory usage %
+- **VPN status** — up/down per tier (if split-routing is configured)
+- **Routing set sizes** — entry count for each nft set, and how long ago the blocklists were last refreshed
+- **WireGuard server peers** — how many peers were active in the last 24h (for server-mode WG interfaces)
+- **Traffic** — ↓/↑ totals, connected device count, active LAN access rule count per network
+- **Blocked counts** — LAN access requests and allowlist rejections logged since boot
+- **Expiring rules** — any temporary LAN access rules expiring today or tomorrow
+- **Calendar events** — upcoming events for the next 7 days (if `GCAL_URL` is configured)
+
+To enable calendar integration, set in `/etc/extra-networks/config`:
 
 ```sh
 GCAL_URL=https://calendar.google.com/calendar/ical/<your-calendar-id>/basic.ics
 GCAL_TZ_OFFSET=1   # hours offset from UTC for time display
 ```
 
-Recurring events (weekly, biweekly) are expanded correctly — the ICS start date from 2011 is no barrier.
+Recurring events (weekly, biweekly) are expanded correctly — the ICS start date is no barrier.
+
+### WAN monitoring
+
+WAN connectivity is checked every 5 minutes by pinging `1.1.1.1` and `8.8.8.8`. When WAN goes down there is no alert (no internet to send it), but the outage start time is recorded locally. When connectivity is restored a notification is sent with the outage duration.
 
 ### VPN monitoring
 
