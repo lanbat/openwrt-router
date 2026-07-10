@@ -621,7 +621,7 @@ for _conf in /etc/extra-networks/*-notify.conf; do
                 _absent_str="${_min} minute$([ "$_min" = 1 ] || printf 's')"
             fi
             _ntfy "Back online — ${IFACE_NAME}" default mobile_phone_back \
-"${_rlabel} (${IPADDR}) returned after ${_absent_str} away."
+"${_rlabel} — ${MACADDR} (${IPADDR}) returned after ${_absent_str} away."
         fi
     fi
 
