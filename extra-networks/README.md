@@ -277,7 +277,7 @@ Sent every morning at 08:00. Includes:
 - **VPN status** — up/down per tier (if split-routing is configured)
 - **Routing set sizes** — entry count for each nft set, and how long ago the blocklists were last refreshed
 - **WireGuard server peers** — how many peers were active in the last 24h (for server-mode WG interfaces)
-- **Traffic** — ↓/↑ totals, connected device count, active LAN access rule count per network
+- **Traffic** — ↓/↑ totals, connected device count (active DHCP leases), active LAN access rule count per network
 - **Blocked counts** — LAN access requests and allowlist rejections logged since boot
 - **Expiring rules** — any temporary LAN access rules expiring today or tomorrow
 - **Calendar events** — upcoming events for the next 7 days (if `GCAL_URL` is configured)
@@ -290,6 +290,33 @@ GCAL_TZ_OFFSET=1   # hours offset from UTC for time display
 ```
 
 Recurring events (weekly, biweekly) are expanded correctly — the ICS start date is no barrier.
+
+### Including the main LAN in the digest
+
+The digest covers every network that has a `*-notify.conf` file in `/etc/extra-networks/`. Isolated networks get one automatically from `install.sh`. The main LAN does not, so create it manually:
+
+```sh
+cat >/etc/extra-networks/lan-notify.conf <<EOF
+NOTIFY_URL=https://ntfy.sh/your-topic
+SUBNET=192.168.1
+IFACE_NAME=lan
+EOF
+```
+
+Traffic reporting also requires a counter chain, which `install.sh` now creates automatically at `/etc/nftables.d/24-lan-counter.nft` on every run. If you're adding the main LAN before running `install.sh` again, create it manually and reload:
+
+```sh
+cat >/etc/nftables.d/24-lan-counter.nft <<'EOF'
+chain lan_counter {
+    type filter hook forward priority 0; policy accept;
+    iifname "br-lan" counter
+    oifname "br-lan" counter
+}
+EOF
+fw4 reload
+```
+
+Device count reflects active DHCP leases matching the `SUBNET` prefix. Devices with static IPs that never request a lease are not counted.
 
 ### WAN monitoring
 
