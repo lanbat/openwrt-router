@@ -77,21 +77,24 @@ if [ -n "${GCAL_URL:-}" ]; then
     fi
 fi
 
-# VPN status line
-VPN_CFG=/etc/split-routing/config
-_vpn_line=""
-if [ -f "$VPN_CFG" ]; then
-    unset VPN_IFACE ROUTE_TABLE FWMARK NOTIFY_URL
-    . "$VPN_CFG"
+# VPN status lines (one per vpn-*.conf tier)
+_vpn_section=""
+for _vpnconf in /etc/split-routing/vpn-*.conf; do
+    [ -f "$_vpnconf" ] || continue
+    unset VPN_IFACE ROUTE_TABLE FWMARK
+    . "$_vpnconf"
+    [ -n "${VPN_IFACE:-}" ] || continue
     _if_up=no; ip link show "$VPN_IFACE" 2>/dev/null | grep -q "LOWER_UP" && _if_up=yes
-    _rule=no;  ip rule show 2>/dev/null | grep -q "lookup ${ROUTE_TABLE}" && _rule=yes
-    _rt=no;    ip route show table "$ROUTE_TABLE" 2>/dev/null | grep -q "^default" && _rt=yes
+    _rule=no;  ip rule show 2>/dev/null | grep -q "lookup ${ROUTE_TABLE:-}" && _rule=yes
+    _rt=no;    ip route show table "${ROUTE_TABLE:-}" 2>/dev/null | grep -q "^default" && _rt=yes
     if [ "$_if_up$_rule$_rt" = yesyesyes ]; then
         _vpn_line="VPN (${VPN_IFACE}): up"
     else
         _vpn_line="VPN (${VPN_IFACE}): DOWN"
     fi
-fi
+    _vpn_section="${_vpn_section:+${_vpn_section}
+}${_vpn_line}"
+done
 
 seen_urls=""
 for _conf in "${BASE_DIR}"/*-notify.conf; do
@@ -112,7 +115,7 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
     _dc_str=$([ "${_dc:-0}" = 1 ] && echo "1 device" || echo "${_dc:-0} devices")
     _rules_str=$([ "${_rules:-0}" = 1 ] && echo "1 LAN rule" || echo "${_rules:-0} LAN rules")
 
-    _body="${_vpn_line:+${_vpn_line}
+    _body="${_vpn_section:+${_vpn_section}
 
 }${_iface} — ${_dc_str}
   ↓ $(_human "$_rx")  ↑ $(_human "$_tx")

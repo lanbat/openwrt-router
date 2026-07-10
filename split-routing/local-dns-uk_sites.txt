@@ -1,0 +1,8 @@
+# UK VPN — domains routed via the UK Mullvad interface.
+# dnsmasq matches subdomains automatically, so bbc.co.uk covers
+# iplayer.bbc.co.uk, www.bbc.co.uk, etc.
+
+# BBC iPlayer
+bbc.co.uk
+bbc.com
+bbci.co.uk
