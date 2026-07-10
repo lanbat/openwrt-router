@@ -142,18 +142,18 @@ if [ -d /etc/split-routing ]; then
         for _c in ${DNS_CATS:-}; do
             _sets_any=1
             _n=$(nft list set inet fw4 "dns_${_tier}_${_c}4" 2>/dev/null \
-                 | grep -c 'expires' || echo 0)
+                 | awk '/expires/{c++}END{print c+0}')
             [ "${_n:-0}" = "0" ] && _sets_ok=0
         done
         for _c in ${RESOLVE_CATS:-}; do
             _sets_any=1
             _n=$(nft list set inet fw4 "resolve_${_tier}_${_c}4" 2>/dev/null \
-                 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | wc -l | tr -d ' ')
+                 | awk '/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/{c++}END{print c+0}')
             [ "${_n:-0}" = "0" ] && _sets_ok=0
         done
     done
     if [ "$_sets_any" = 1 ]; then
-        _log_ts=$(stat -c %Y /tmp/routing-sets.log 2>/dev/null || echo 0)
+        _log_ts=$(stat -c %Y /tmp/routing-sets.log 2>/dev/null); _log_ts=${_log_ts:-0}
         _log_age=""
         if [ "${_log_ts:-0}" -gt 0 ]; then
             _age_secs=$(( $(date +%s) - _log_ts ))
@@ -193,8 +193,8 @@ done
 # ── Access log counts since boot ──────────────────────────────────────────────
 
 _log_lines=$(logread 2>/dev/null)
-_lan_reqs=$(printf '%s\n' "$_log_lines" | grep -c 'EXTNET-2LAN' || echo 0)
-_deny=$(printf '%s\n' "$_log_lines" | grep -c 'EXTNET-DENY' || echo 0)
+_lan_reqs=$(printf '%s\n' "$_log_lines" | awk '/EXTNET-2LAN/{c++}END{print c+0}')
+_deny=$(printf '%s\n' "$_log_lines" | awk '/EXTNET-DENY/{c++}END{print c+0}')
 unset _log_lines
 _activity_line=""
 _activity_parts=""
