@@ -273,9 +273,18 @@ When a device is labeled — either at approval time or later via the device pag
 
 Sent every morning at 08:00 with traffic totals (↓/↑), connected device count, and active LAN access rule count for each network. Also includes VPN status if split-routing is configured.
 
+Optionally includes upcoming Google Calendar events for the next 7 days. Set in `/etc/extra-networks/config`:
+
+```sh
+GCAL_URL=https://calendar.google.com/calendar/ical/<your-calendar-id>/basic.ics
+GCAL_TZ_OFFSET=1   # hours offset from UTC for time display
+```
+
+Recurring events (weekly, biweekly) are expanded correctly — the ICS start date from 2011 is no barrier.
+
 ### VPN monitoring
 
-If `/etc/split-routing/config` is present, VPN state is checked every 5 minutes. A high-priority alert fires when the VPN goes down; a default-priority alert fires when it recovers. Uses the `NOTIFY_URL` from the split-routing config if set, otherwise falls back to the first extra-networks topic.
+If `/etc/split-routing/` is present, each VPN tier (`vpn-*.conf`) is monitored independently every 5 minutes. A high-priority alert fires when a tier goes down; a default-priority alert fires when it recovers. State is persisted in `/etc/extra-networks/vpn-state-<iface>` so only transitions trigger alerts. Uses the `NOTIFY_URL` from the first configured extra-networks network.
 
 ### WireGuard VPN server peers
 
