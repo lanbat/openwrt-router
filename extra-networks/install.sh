@@ -748,6 +748,16 @@ for _hconf in /var/run/hostapd-*.conf; do
         >/dev/null 2>&1 || true
 done
 
+# ── wifi race condition recovery ──────────────────────────────────────────────
+# On MT7986 (and some other chips), wifi reload triggers a mac80211 race that
+# tears down phy0 VAPs immediately after creating them. This init.d service
+# runs at START=99 and reapplies hostapd config_set for any phy with no VAPs.
+# It is a no-op on machines where wifi comes up cleanly.
+
+cp "${SCRIPT_DIR}/tools/wifi-recover" /etc/init.d/wifi-recover
+chmod 0755 /etc/init.d/wifi-recover
+/etc/init.d/wifi-recover enable 2>/dev/null || true
+
 # ── summary ───────────────────────────────────────────────────────────────────
 
 echo "Installed: $IFACE"
