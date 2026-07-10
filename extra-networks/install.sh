@@ -502,6 +502,15 @@ chain ${IFACE}_counter {
 }
 EOF
 
+# Main LAN counter — created once; used by digest.sh when lan-notify.conf exists.
+cat >/etc/nftables.d/24-lan-counter.nft <<'EOF'
+chain lan_counter {
+    type filter hook forward priority 0; policy accept;
+    iifname "br-lan" counter
+    oifname "br-lan" counter
+}
+EOF
+
 # Per-device byte tracking (used by bandwidth-check.sh and the status dashboard).
 # Created when NOTIFY_URL is set; removed when it is unset.
 rm -f /etc/nftables.d/26-${IFACE}-device-track.nft
