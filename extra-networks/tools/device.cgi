@@ -336,7 +336,7 @@ MAC: ${MAC}"
 "${_DEV_DISPLAY} has been removed from ${_iface}.
 
 ${_device_detail}"
-        printf '<meta http-equiv="refresh" content="0;url=/cgi-bin/status">'
+        printf '<meta http-equiv="refresh" content="0;url=/cgi-bin/network?net=%s">' "$(_html "$_iface")"
         exit 0
         ;;
 
