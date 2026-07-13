@@ -542,16 +542,24 @@ _hist_stats=$(awk -v m="$MAC" -F'\t' '
     }
     END{print mx"\t"mxw"\t"mn"\t"mnw"\t"cnt}
 ' ${BASE_DIR}/*-join-history 2>/dev/null || true)
-_LAST_SEEN_TS=$(printf '%s' "$_hist_stats" | awk -F'\t' '{print $1}')
 _FIRST_SEEN_FMT=$(printf '%s' "$_hist_stats" | awk -F'\t' '{print $4}')
 _JOIN_COUNT=$(printf '%s' "$_hist_stats" | awk -F'\t' '{print $5}')
-if [ "$_online_text" = Online ]; then
-    _LAST_SEEN_DISPLAY="Now (online)"
-elif [ -n "$_LAST_SEEN_TS" ] && [ "$_LAST_SEEN_TS" -gt 0 ] 2>/dev/null; then
-    _LAST_SEEN_DISPLAY=$(_rel_time "$_LAST_SEEN_TS")
-else
-    _LAST_SEEN_DISPLAY="Unknown"
-fi
+_last_seen_rows=""
+for _ls_hf in "${BASE_DIR}"/*-join-history; do
+    [ -f "$_ls_hf" ] || continue
+    _ls_net="${_ls_hf##*/}"; _ls_net="${_ls_net%-join-history}"
+    _ls_ts=$(awk -v m="$MAC" -F'\t' \
+        'tolower($4)==tolower(m)&&$1+0>mx+0{mx=$1}END{if(mx+0>0)print mx}' \
+        "$_ls_hf" 2>/dev/null || true)
+    [ -z "$_ls_ts" ] && continue
+    if [ "$_online_text" = Online ] && [ "$_ls_net" = "$_iface" ]; then
+        _ls_rel="Now (online)"
+    else
+        _ls_rel=$(_rel_time "$_ls_ts")
+    fi
+    _last_seen_rows="${_last_seen_rows}<div class=\"row\"><span class=\"lbl\">Last seen (${_ls_net})</span><span class=\"val\">${_ls_rel}</span></div>"
+done
+[ -z "$_last_seen_rows" ] && _last_seen_rows='<div class="row"><span class="lbl">Last seen</span><span class="val dim">Unknown</span></div>'
 
 # Lease status from /tmp/dhcp.leases (epoch mac ip hostname)
 _lease_line=$(awk -v m="$MAC" 'tolower($2)==tolower(m){print; exit}' /tmp/dhcp.leases 2>/dev/null || true)
@@ -619,8 +627,9 @@ input[type=text],input[type=number]{font-size:.875rem;padding:.3rem .5rem;
 <div class="card">
 <div class="row"><span class="lbl">MAC</span><span class="val">$(_html "$MAC")</span></div>
 <div class="row"><span class="lbl">Manufacturer</span><span class="val dim">${_MANUFACTURER:----}</span></div>
+<div class="row"><span class="lbl">Label</span><span class="val"><form method="POST" action="/cgi-bin/device" style="display:inline-flex;gap:.3rem;align-items:center"><input type="hidden" name="net" value="$(_html "$NET")"><input type="hidden" name="mac" value="$(_html "$MAC")"><input type="hidden" name="action" value="set_label"><input type="text" name="label" value="$(_html "$_DEV_LABEL")" placeholder="e.g. Living Room TV" maxlength="40" style="width:160px"><button type="submit">Save</button></form></span></div>
 <div class="row"><span class="lbl">Online</span><span class="val ${_online_cls}"><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:$([ "$_online_cls" = ok ] && printf '#2e7d32' || printf '#ccc');margin-right:.35rem;vertical-align:middle"></span>${_online_text}</span></div>
-<div class="row"><span class="lbl">Last seen</span><span class="val">$(_html "$_LAST_SEEN_DISPLAY")</span></div>
+${_last_seen_rows}
 <div class="row"><span class="lbl">Tracked IPv4</span><span class="val">${_DEV_IP:----}</span></div>
 <div class="row"><span class="lbl">Tracked IPv6</span><span class="val">${_DEV_IP6:----}</span></div>
 <div class="row"><span class="lbl">DHCP hostname</span><span class="val">${_DEV_HN:----}</span></div>
