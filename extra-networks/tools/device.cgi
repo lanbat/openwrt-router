@@ -664,16 +664,15 @@ if [ -f "$1" ]; then
             if(actor==""&&host!="")actor=host
             cls=(act in bcls)?bcls[act]:"untracked"
             lbl=(act in blbl)?blbl[act]:h(act)
-            hip=(ri4[i]!="")?ri4[i]:(ip6!="")?ip6:"—"
             if(amac!="")by="<a href=\"/cgi-bin/device?net=lan&mac="h(amac)"\">"h(amac)"</a>"
             else by=h(actor!=""?actor:"unknown")
-            printf "<tr><td class=\"dim\">%s</td><td><span class=\"badge badge-%s\">%s</span></td><td>%s</td><td>%s</td><td class=\"dim\">%s</td></tr>\n",\
-                h(rw[i]),cls,lbl,h(net),h(hip),by
+            printf "<tr><td class=\"dim\">%s</td><td><span class=\"badge badge-%s\">%s</span></td><td>%s</td><td>%s</td><td>%s</td><td class=\"dim\">%s</td></tr>\n",\
+                h(rw[i]),cls,lbl,h(net),h(ri4[i]!=""?ri4[i]:"—"),h(ip6!=""?ip6:"—"),by
         }
     }' "$@" 2>/dev/null)
 fi
 if [ -n "$_history_html" ]; then
-    printf '<table><tr><th>When</th><th>Decision</th><th>Network</th><th>IP</th><th>By</th></tr>\n'
+    printf '<table><tr><th>When</th><th>Decision</th><th>Network</th><th>IPv4</th><th>IPv6</th><th>By</th></tr>\n'
     printf '%s\n' "$_history_html"
     printf '</table>\n'
 else
