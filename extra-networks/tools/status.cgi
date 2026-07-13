@@ -211,19 +211,18 @@ if command -v wg >/dev/null 2>&1; then
             _tr_disp="—"
             [ "${_drx:-0}" -gt 0 ] || [ "${_dtx:-0}" -gt 0 ] 2>/dev/null && \
                 _tr_disp="$(_human "${_drx:-0}") / $(_human "${_dtx:-0}")"
-            printf '<tr><td>%s</td><td>%s</td><td class="dim">%s</td><td class="%s">%s</td><td>%s</td><td>%s</td></tr>\n' \
+            printf '<tr><td style="text-align:center;padding:.5rem .15rem"><span style="display:inline-block;width:11px;height:11px;border-radius:50%%;background:%s"></span></td><td>%s</td><td>%s</td><td class="dim">%s</td><td>%s</td><td>%s</td></tr>\n' \
+                "$([ "$_online" = yes ] && printf '#2e7d32' || printf '#ccc')" \
                 "$(_html "$_peer_label")" \
                 "$_ep_disp" \
                 "$(_html "$(printf '%s' "$_aips" | tr ' ' ',')")" \
-                "$([ "$_online" = yes ] && echo ok || echo dim)" \
-                "$([ "$_online" = yes ] && echo '●' || echo '○')" \
                 "$_hs_str" \
                 "$_tr_disp"
         done >> "$_wgs_tmp" 2>/dev/null
 
         if [ -s "$_wgs_tmp" ]; then
             printf '<h2>WireGuard — %s</h2>\n' "$(_html "$_wgs")"
-            printf '<table><tr><th>Peer</th><th>Endpoint</th><th>Allowed IPs</th><th>Online</th><th>Last seen</th><th>Traffic ↓/↑</th></tr>\n'
+            printf '<table><tr><th style="width:2rem;text-align:center;padding:.45rem .15rem"></th><th>Peer</th><th>Endpoint</th><th>Allowed IPs</th><th>Last seen</th><th>Traffic ↓/↑</th></tr>\n'
             cat "$_wgs_tmp"
             printf '</table>\n'
         fi
@@ -490,7 +489,7 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
             && _join_history_prune "$_iface" "${JOIN_HISTORY_RETENTION:-90d}"
         if [ -s "$_history" ]; then
             printf '<h2 style="margin-top:1.25rem">Join history — %s</h2>' "$(_html "$_iface")"
-            printf '<table><tr><th>When</th><th>Decision</th><th>Label</th><th>IP</th><th>MAC</th><th>By</th></tr>\n'
+            printf '<table><tr><th>When</th><th>Decision</th><th>Label</th><th>IPv4</th><th>IPv6</th><th>MAC</th><th>By</th></tr>\n'
             awk -v iface="$_iface" -v lf="${BASE_DIR}/${_iface}-device-labels" -F'\t' '
             function h(s,  t){t=s;gsub(/&/,"\\&amp;",t);gsub(/</,"\\&lt;",t);gsub(/>/,"\\&gt;",t);gsub(/"/,"\\&quot;",t);return t}
             BEGIN{
@@ -515,11 +514,10 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
                     lbl=(act in blbl)?blbl[act]:h(act)
                     lkey=tolower(dmac)
                     hlabel=(lkey in lab)?lab[lkey]:((host!=""&&host!="unknown")?host:dmac)
-                    hip=(ip4!="")?ip4:(ip6!="")?ip6:"—"
                     if(amac!="")by="<a href=\"/cgi-bin/device?net=lan&mac="h(amac)"\">"h(amac)"</a>"
                     else by=h(actor!=""?actor:"unknown")
-                    printf "<tr><td class=\"dim\">%s</td><td><span class=\"badge badge-%s\">%s</span></td><td><a href=\"/cgi-bin/device?net=%s&mac=%s\">%s</a></td><td>%s</td><td class=\"dim\"><a href=\"/cgi-bin/device?net=%s&mac=%s\">%s</a></td><td class=\"dim\">%s</td></tr>\n",\
-                        h(when),cls,lbl,iface,h(dmac),h(hlabel),h(hip),iface,h(dmac),h(dmac),by
+                    printf "<tr><td class=\"dim\">%s</td><td><span class=\"badge badge-%s\">%s</span></td><td><a href=\"/cgi-bin/device?net=%s&mac=%s\">%s</a></td><td>%s</td><td>%s</td><td class=\"dim\"><a href=\"/cgi-bin/device?net=%s&mac=%s\">%s</a></td><td class=\"dim\">%s</td></tr>\n",\
+                        h(when),cls,lbl,iface,h(dmac),h(hlabel),h(ip4!=""?ip4:"—"),h(ip6!=""?ip6:"—"),iface,h(dmac),h(dmac),by
                 }
             }' "$_history" 2>/dev/null
             printf '</table>\n'
