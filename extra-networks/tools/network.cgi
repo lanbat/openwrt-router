@@ -21,6 +21,7 @@ _urldecode() {
 
 _params="${QUERY_STRING:-}"
 NET=$(_urldecode "$(_get_param "$_params" net)")
+HIGHLIGHT_MAC=$(_urldecode "$(_get_param "$_params" mac)" | tr 'ABCDEF' 'abcdef')
 printf '%s' "$NET" | grep -qE '^[a-z][a-z0-9_]*$' \
     || { printf 'Content-Type: text/html\r\n\r\n<h1>Invalid network</h1>'; exit 0; }
 
@@ -140,6 +141,8 @@ button{font-size:.75rem;padding:.15rem .45rem;cursor:pointer;background:#1976d2;
 .badge-disconnected{color:#555;background:#eee}
 .badge-deleted{color:#fff;background:#37474f}
 .net-desc{color:#555;font-size:.88rem;margin:.15rem 0 1.25rem}
+@keyframes hl{0%{background:#fff9c4}100%{background:transparent}}
+tr.highlight td{animation:hl 2s ease-out forwards}
 .qr{display:flex;align-items:stretch;gap:1rem}
 .qr-info{font-size:.9rem;display:flex;flex-direction:column;flex:1;min-width:0}
 .qr-info strong{margin-bottom:.2rem}
@@ -260,7 +263,7 @@ _emit_device_row() {
             "$_join_pending_f" 2>/dev/null || true)
     _ejhost=$([ "$_ehn" != "*" ] && printf '%s' "$_ehn" || true)
 
-    printf '<tr>'
+    printf '<tr data-mac="%s">' "$_emac_lc"
     printf '<td style="text-align:center;padding:.5rem .15rem"><span style="display:inline-block;width:11px;height:11px;border-radius:50%%;background:%s"></span></td>' \
         "$([ "$_eonline_cls" = ok ] && printf '#2e7d32' || printf '#ccc')"
 
@@ -533,6 +536,13 @@ fi
 
 cat <<'SCRIPT'
 <script>
+(function(){
+  var p=new URLSearchParams(location.search),mac=p.get('mac');
+  if(mac){
+    var row=document.querySelector('tr[data-mac="'+mac.toLowerCase()+'"]');
+    if(row){row.scrollIntoView({block:'center'});row.classList.add('highlight');}
+  }
+})();
 (function(){
   var q=document.querySelectorAll('.qr-canvas');
   for(var i=0;i<q.length;i++){

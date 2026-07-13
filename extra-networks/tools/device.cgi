@@ -567,7 +567,7 @@ for _ls_hf in "${BASE_DIR}"/*-join-history; do
         _ls_rel=$(_rel_time "$_ls_last_ts")
     fi
     _sep=$([ -n "$_last_seen_val" ] && printf '<br>' || true)
-    _ls_link="<a href=\"/cgi-bin/network?net=${_ls_net}\" class=\"dim\">${_ls_net}</a>"
+    _ls_link="<a href=\"/cgi-bin/network?net=${_ls_net}&amp;mac=${MAC}\" class=\"dim\">${_ls_net}</a>"
     _last_seen_val="${_last_seen_val}${_sep}${_ls_link}&ensp;${_ls_rel}"
     _first_seen_val="${_first_seen_val}${_sep}${_ls_link}&ensp;${_ls_first_fmt:-—}"
 done
@@ -778,10 +778,9 @@ if [ -f "$1" ]; then
             act=ra[i];tmac=rm[i];net=rnet[i]
             cls=(act in bcls)?bcls[act]:"untracked"
             lbl=(act in blbl)?blbl[act]:h(act)
-            tip=(ri4[i]!="")?ri4[i]:(ri6[i]!="")?ri6[i]:"—"
             tlink=(tmac!="")?"<a href=\"/cgi-bin/device?net="h(net)"&mac="h(tmac)"\">"h(tmac)"</a>":"—"
-            printf "<tr><td class=\"dim\">%s</td><td><span class=\"badge badge-%s\">%s</span></td><td>%s</td><td class=\"dim\">%s</td><td>%s</td></tr>\n",\
-                h(rw[i]),cls,lbl,h(net),tlink,h(tip)
+            printf "<tr><td class=\"dim\">%s</td><td><span class=\"badge badge-%s\">%s</span></td><td>%s</td><td class=\"dim\">%s</td><td>%s</td><td>%s</td></tr>\n",\
+                h(rw[i]),cls,lbl,h(net),tlink,h(ri4[i]!=""?ri4[i]:"—"),h(ri6[i]!=""?ri6[i]:"—")
         }
     }' "$@" 2>/dev/null)
 fi
