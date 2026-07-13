@@ -528,6 +528,10 @@ if [ "$_online_text" != Online ] && [ -n "$_DEV_IP6" ]; then
     case "$_ns" in REACHABLE|DELAY|PROBE) _online_cls=ok; _online_text=Online ;; esac
 fi
 
+# Manufacturer via OUI lookup
+_mac_oui=$(printf '%s' "$MAC" | tr -d ':' | tr 'abcdef' 'ABCDEF' | cut -c1-6)
+_MANUFACTURER=$(awk -v p="$_mac_oui" -F'\t' '$1==p{print $2; exit}' "${BASE_DIR}/oui.txt" 2>/dev/null || true)
+
 # History stats: last seen, first seen, join count across all networks
 # shellcheck disable=SC2086
 _hist_stats=$(awk -v m="$MAC" -F'\t' '
@@ -614,6 +618,7 @@ input[type=text],input[type=number]{font-size:.875rem;padding:.3rem .5rem;
 <h2>Device</h2>
 <div class="card">
 <div class="row"><span class="lbl">MAC</span><span class="val">$(_html "$MAC")</span></div>
+<div class="row"><span class="lbl">Manufacturer</span><span class="val dim">${_MANUFACTURER:----}</span></div>
 <div class="row"><span class="lbl">Online</span><span class="val ${_online_cls}"><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:$([ "$_online_cls" = ok ] && printf '#2e7d32' || printf '#ccc');margin-right:.35rem;vertical-align:middle"></span>${_online_text}</span></div>
 <div class="row"><span class="lbl">Last seen</span><span class="val">$(_html "$_LAST_SEEN_DISPLAY")</span></div>
 <div class="row"><span class="lbl">Tracked IPv4</span><span class="val">${_DEV_IP:----}</span></div>

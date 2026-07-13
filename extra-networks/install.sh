@@ -759,6 +759,21 @@ cp "${SCRIPT_DIR}/tools/wifi-recover" /etc/init.d/wifi-recover
 chmod 0755 /etc/init.d/wifi-recover
 /etc/init.d/wifi-recover enable 2>/dev/null || true
 
+# ── OUI database ──────────────────────────────────────────────────────────────
+_oui_f="${BASE_DIR}/oui.txt"
+if [ ! -f "$_oui_f" ]; then
+    printf 'Downloading OUI database... '
+    if curl -sf --max-time 30 'https://standards-oui.ieee.org/oui/oui.csv' 2>/dev/null \
+        | awk -F',' 'NR>1 && $2!=""{printf "%s\t%s\n",$2,$3}' > "${_oui_f}.tmp" \
+        && [ -s "${_oui_f}.tmp" ]; then
+        mv "${_oui_f}.tmp" "$_oui_f"
+        printf 'done (%d entries)\n' "$(wc -l < "$_oui_f")"
+    else
+        rm -f "${_oui_f}.tmp"
+        printf 'failed (manufacturer lookup will show — on device page)\n'
+    fi
+fi
+
 # ── summary ───────────────────────────────────────────────────────────────────
 
 echo "Installed: $IFACE"
