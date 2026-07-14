@@ -545,13 +545,20 @@ if [ "$_online_text" != Online ] && [ -n "$_DEV_IP6" ]; then
     case "$_ns" in REACHABLE|DELAY|PROBE) _online_cls=ok; _online_text=Online ;; esac
 fi
 
-# Manufacturer via OUI lookup; locally administered (randomized) MACs have no OUI entry
-_mac_oui=$(printf '%s' "$MAC" | tr -d ':' | tr 'abcdef' 'ABCDEF' | cut -c1-6)
-_mac_first=$(printf '%d' "0x${_mac_oui%????}")
+# Manufacturer via OUI lookup; locally administered (randomized) MACs have no OUI entry.
+# Checks 36-bit (9 hex), 28-bit (7 hex), and 24-bit (6 hex) prefixes — longest match wins.
+_mac_hex=$(printf '%s' "$MAC" | tr -d ':' | tr 'abcdef' 'ABCDEF')
+_mac_first=$(printf '%d' "0x${_mac_hex%??????????}")
 if [ $(( _mac_first & 2 )) -ne 0 ]; then
     _MANUFACTURER="Randomized MAC"
 else
-    _MANUFACTURER=$(awk -v p="$_mac_oui" -F'\t' '$1==p{print $2; exit}' "${BASE_DIR}/oui.txt" 2>/dev/null || true)
+    _MANUFACTURER=$(awk -F'\t' -v m="$_mac_hex" '
+        { l = length($1) }
+        l == 9 && substr(m,1,9) == $1 && best < 9 { r = $2; best = 9 }
+        l == 7 && substr(m,1,7) == $1 && best < 7 { r = $2; best = 7 }
+        l == 6 && substr(m,1,6) == $1 && best < 6 { r = $2; best = 6 }
+        END { print r }
+    ' "${BASE_DIR}/oui.txt" 2>/dev/null || true)
 fi
 
 # History stats: last seen, first seen, join count across all networks

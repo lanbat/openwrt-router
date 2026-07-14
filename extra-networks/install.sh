@@ -776,19 +776,14 @@ cp "${SCRIPT_DIR}/tools/wifi-recover-hotplug" /etc/hotplug.d/net/30-wifi-recover
 chmod 0755 /etc/hotplug.d/net/30-wifi-recover
 
 # ── OUI database ──────────────────────────────────────────────────────────────
-_oui_f="${BASE_DIR}/oui.txt"
-if [ ! -f "$_oui_f" ]; then
-    printf 'Downloading OUI database... '
-    if curl -sf --max-time 30 'https://standards-oui.ieee.org/oui/oui.csv' 2>/dev/null \
-        | awk -F',' 'NR>1 && $2!=""{printf "%s\t%s\n",$2,$3}' > "${_oui_f}.tmp" \
-        && [ -s "${_oui_f}.tmp" ]; then
-        mv "${_oui_f}.tmp" "$_oui_f"
-        printf 'done (%d entries)\n' "$(wc -l < "$_oui_f")"
-    else
-        rm -f "${_oui_f}.tmp"
-        printf 'failed (manufacturer lookup will show — on device page)\n'
-    fi
-fi
+cp "${SCRIPT_DIR}/tools/oui-update.sh" "${BASE_DIR}/oui-update.sh"
+chmod 0755 "${BASE_DIR}/oui-update.sh"
+sh "${BASE_DIR}/oui-update.sh"
+
+# Weekly refresh every Sunday at 03:00
+( crontab -l 2>/dev/null | grep -vF '# extra-networks-oui'
+  printf '0 3 * * 0 sh %s/oui-update.sh 2>/dev/null # extra-networks-oui\n' "$BASE_DIR"
+) | crontab -
 
 # ── summary ───────────────────────────────────────────────────────────────────
 
