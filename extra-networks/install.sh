@@ -766,6 +766,10 @@ cp "${SCRIPT_DIR}/tools/wifi-recover" /etc/init.d/wifi-recover
 chmod 0755 /etc/init.d/wifi-recover
 /etc/init.d/wifi-recover enable 2>/dev/null || true
 
+mkdir -p /etc/hotplug.d/net
+cp "${SCRIPT_DIR}/tools/wifi-recover-hotplug" /etc/hotplug.d/net/30-wifi-recover
+chmod 0755 /etc/hotplug.d/net/30-wifi-recover
+
 # ── OUI database ──────────────────────────────────────────────────────────────
 _oui_f="${BASE_DIR}/oui.txt"
 if [ ! -f "$_oui_f" ]; then

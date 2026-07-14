@@ -1,0 +1,44 @@
+#!/bin/sh
+# Reacts to phy0 VAP removal mid-session (MT7986 mac80211 race condition).
+# Complements the boot-time init.d service by also recovering during normal
+# operation when a wifi reload is triggered by install.sh or package upgrades.
+
+[ "$ACTION" = remove ] || exit 0
+
+case "$INTERFACE" in
+    phy0-ap*) ;;
+    *) exit 0 ;;
+esac
+
+# Atomic lock — only one recovery runs at a time
+_lock=/tmp/wifi-recover-hotplug.lock
+mkdir "$_lock" 2>/dev/null || exit 0
+
+(
+    # Brief pause so all VAPs from the same reload batch have time to go down
+    sleep 3
+
+    # If phy0 already has VAPs (e.g. this was a single-VAP flap, not the race),
+    # there is nothing to do
+    if iw dev 2>/dev/null | grep -q 'Interface phy0-'; then
+        rmdir "$_lock"
+        exit 0
+    fi
+
+    _hconf=/var/run/hostapd-phy0.conf
+    [ -f "$_hconf" ] || { rmdir "$_lock"; exit 0; }
+
+    _attempt=0
+    while [ "$_attempt" -lt 5 ]; do
+        iw dev 2>/dev/null | grep -q 'Interface phy0-' && break
+        logger -t wifi-recover "phy0: no VAPs up mid-session (attempt $((_attempt+1))), recovering"
+        ubus call hostapd config_set \
+            "{\"phy\":\"phy0\",\"radio\":-1,\"config\":\"${_hconf}\",\"prev_config\":\"${_hconf}.prev\"}" \
+            >/dev/null 2>&1 || true
+        sleep 3
+        _attempt=$((_attempt+1))
+    done
+
+    [ "$_attempt" -eq 5 ] && logger -t wifi-recover "phy0: gave up after 5 attempts (mid-session)"
+    rmdir "$_lock"
+) &
