@@ -129,6 +129,63 @@ elif [ -n "$_wan_ip" ]; then
 fi
 printf '</div>\n'
 
+# ── WiFi ───────────────────────────────────────────────────────────────────────
+
+_iw_dev=$(iw dev 2>/dev/null)
+
+# Parse iw dev into per-phy records: phy<TAB>iface<TAB>ssid<TAB>channel<TAB>band
+_iw_parsed=$(printf '%s\n' "$_iw_dev" | awk '
+    /^phy#/ {
+        if (iface) print phy"\t"iface"\t"ssid"\t"ch"\t"band
+        phy = $0; sub(/^phy#/, "phy", phy)
+        iface = ""; ssid = ""; ch = ""; band = ""
+    }
+    /^[[:space:]]+Interface / {
+        if (iface) print phy"\t"iface"\t"ssid"\t"ch"\t"band
+        iface = $2; ssid = ""; ch = ""; band = ""
+    }
+    /ssid /    { ssid = substr($0, index($0, $2)) }
+    /channel / {
+        ch = $2
+        freq = substr($3, 2) + 0
+        if      (freq > 0    && freq < 3000) band = "2.4 GHz"
+        else if (freq >= 5000 && freq < 6000) band = "5 GHz"
+        else if (freq >= 6000)                band = "6 GHz"
+    }
+    END { if (iface) print phy"\t"iface"\t"ssid"\t"ch"\t"band }
+')
+
+# Collect unique phys and their summary
+_wifi_phys=$(printf '%s\n' "$_iw_parsed" | awk -F'\t' '{print $1}' | sort -u)
+
+if [ -n "$_wifi_phys" ]; then
+    printf '<h2>WiFi</h2><div class="card">'
+    printf '%s\n' "$_wifi_phys" | while read -r _phy; do
+        _phy_rows=$(printf '%s\n' "$_iw_parsed" | awk -F'\t' -v p="$_phy" '$1==p')
+        _vap_count=$(printf '%s\n' "$_phy_rows" | awk 'NF' | wc -l | tr -d ' ')
+        _band=$(printf '%s\n' "$_phy_rows" | awk -F'\t' 'NF && $5{print $5; exit}')
+        _ch=$(printf '%s\n' "$_phy_rows" | awk -F'\t' 'NF && $4{print $4; exit}')
+
+        # Count expected VAPs for this phy from UCI (radio name matches phy by convention)
+        _radio="radio${_phy#phy}"
+        _expected=$(uci show wireless 2>/dev/null \
+            | awk -F= -v r="'${_radio}'" '/\.device=/{if($2==r) c++} END{print c+0}')
+
+        if [ "${_vap_count:-0}" -eq 0 ]; then
+            _phy_st="warn"; _phy_lbl="down — no VAPs"
+        elif [ -n "$_expected" ] && [ "$_vap_count" -lt "$_expected" ]; then
+            _phy_st="warn"; _phy_lbl="${_vap_count} of ${_expected} VAPs up"
+        else
+            _phy_st="ok"; _phy_lbl="${_vap_count} VAP$([ "$_vap_count" -ne 1 ] && echo s) up"
+        fi
+
+        _label="${_band:-$_phy}$([ -n "$_ch" ] && printf ', ch %s' "$_ch")"
+        printf '<div class="row"><span class="lbl">%s</span><span class="val %s">%s</span></div>' \
+            "$(_html "$_label")" "$_phy_st" "$_phy_lbl"
+    done
+    printf '</div>\n'
+fi
+
 # ── VPN ────────────────────────────────────────────────────────────────────────
 
 _vpn_ifaces=""
@@ -269,8 +326,7 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
     _rx=$(_nft_bytes "${_iface}_counter" in);  _rxh=$(_human "$_rx")
     _tx=$(_nft_bytes "${_iface}_counter" out); _txh=$(_human "$_tx")
     # WiFi interface for signal strength (e.g. phy0-ap1 for br-guest)
-    _wlan=$(ip link show master "br-${_iface}" 2>/dev/null \
-        | awk 'NR==1{n=$2; sub(/@.*/,"",n); print n}')
+    _wlan=$(ls "/sys/class/net/br-${_iface}/brif/" 2>/dev/null | grep '^phy' | head -1)
     _assoc=$([ -n "$_wlan" ] && iwinfo "$_wlan" assoclist 2>/dev/null || true)
 
     # IPv6: NDP neighbour table first, then odhcpd DHCPv6 leases as fallback
@@ -353,6 +409,19 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
     [ "${BANDWIDTH_THRESHOLD_MB:-0}" != 0 ] && \
         printf '<div class="row"><span class="lbl">Bandwidth alert</span><span class="val">%s MB/h</span></div>' \
             "$BANDWIDTH_THRESHOLD_MB"
+    if [ -n "$_wlan" ]; then
+        _vap_row=$(printf '%s\n' "$_iw_parsed" | awk -F'\t' -v iface="$_wlan" '$2==iface{print; exit}')
+        if [ -n "$_vap_row" ]; then
+            _vap_ch=$(printf '%s\n' "$_vap_row" | cut -f4)
+            _vap_band=$(printf '%s\n' "$_vap_row" | cut -f5)
+            _vap_lbl="${_wlan}$([ -n "$_vap_ch" ] && printf ', ch %s' "$_vap_ch")$([ -n "$_vap_band" ] && printf ' (%s)' "$_vap_band")"
+            printf '<div class="row"><span class="lbl">WiFi</span><span class="val ok">%s</span></div>' \
+                "$(_html "$_vap_lbl")"
+        else
+            printf '<div class="row"><span class="lbl">WiFi</span><span class="val warn">%s down</span></div>' \
+                "$(_html "$_wlan")"
+        fi
+    fi
     printf '</div>\n'
 
     # ── WiFi QR code + rotate button ─────────────────────────────────────────
