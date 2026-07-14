@@ -154,12 +154,15 @@ IPv6: ${_actor_ip6:----}"
             mkdir -p "$BASE_DIR"
             _upsert "$_labels_f" "$MAC" "$_safe"
             if [ "$_safe" != "$_DEV_LABEL" ]; then
+                _extra="$(_device_action Device "$_iface" "$MAC")"
+                [ -n "$_actor_mac" ] && _extra="${_extra}; $(_device_action Actor lan "$_actor_mac")"
                 _ntfy "Label set — ${_iface}" default pencil2 \
                     "MAC: ${MAC}${_DEV_LABEL:+
 Was: ${_DEV_LABEL}}
 Now: ${_safe}
 
-${_actor_info}"
+${_actor_info}" \
+                    "$_extra"
                 _join_history_add "$_iface" labelled "$MAC" \
                     "${_DEV_IP:-$(_ip4_for_mac "$MAC")}" "${_DEV_IP6:-$(_ip6_for_mac "$MAC")}" \
                     "${_DEV_LABEL:+${_DEV_LABEL} → }${_safe}" \
@@ -188,10 +191,8 @@ ${_actor_info}"
         ;;
 
     revoke_join_approval)
-        _rip=$(ip addr show br-lan 2>/dev/null | awk '/inet / { split($2,a,"/"); print a[1]; exit }')
-        _rip="${_rip:-192.168.1.1}"
-        _approver_action=""
-        [ -n "$_actor_mac" ] && _approver_action="view, Approver, http://${_rip}/cgi-bin/device?net=lan&mac=${_actor_mac}"
+        _approver_action="$(_device_action Device "$_iface" "$MAC")"
+        [ -n "$_actor_mac" ] && _approver_action="${_approver_action}; $(_device_action Approver lan "$_actor_mac")"
         _notify_ip="${_DEV_IP:-${_DEV_IP6:-}}"
         _dns=$([ -n "$_notify_ip" ] && nslookup "$_notify_ip" 2>/dev/null | awk '/name =/{gsub(/\.$/,"",$NF); print $NF; exit}' || true)
         _device_detail="IPv4: ${_DEV_IP:-unknown}
@@ -246,10 +247,13 @@ The device is no longer approved on ${_iface}." \
         grep -qF "$_dentry" "$_dconf" 2>/dev/null \
             || printf '%s\n' "$_dentry" >> "$_dconf"
         /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
+        _extra="$(_device_action Device "$_iface" "$MAC")"
+        [ -n "$_actor_mac" ] && _extra="${_extra}; $(_device_action Actor lan "$_actor_mac")"
         _ntfy "Rule added — ${_iface}" default shield \
             "${_DEV_DISPLAY}: ${_dom} allowed on ${_iface}.
 
-${_actor_info}"
+${_actor_info}" \
+            "$_extra"
         printf '<meta http-equiv="refresh" content="0;url=%s">' "$(_html "$_BACK_URL")"
         exit 0
         ;;
@@ -275,10 +279,13 @@ ${_actor_info}"
                 > "${_pending_f}.tmp" 2>/dev/null \
                 && mv "${_pending_f}.tmp" "$_pending_f" || true
         }
+        _extra="$(_device_action Device "$_iface" "$MAC")"
+        [ -n "$_actor_mac" ] && _extra="${_extra}; $(_device_action Actor lan "$_actor_mac")"
         _ntfy "Rule added — ${_iface}" default shield \
             "${_DEV_DISPLAY}: ${_dip}:${_dpt}/${_dpr} allowed on ${_iface}.
 
-${_actor_info}"
+${_actor_info}" \
+            "$_extra"
         printf '<meta http-equiv="refresh" content="0;url=%s">' "$(_html "$_BACK_URL")"
         exit 0
         ;;
@@ -364,12 +371,15 @@ MAC: ${MAC}"
         /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
         # Rebuild inspect chain (removes per-device nft sets and rules)
         setsid sh /etc/extra-networks/_regen-inspect.sh "$_iface" >/dev/null 2>&1 &
+        _extra="$(_device_action Device "$_iface" "$MAC")"
+        [ -n "$_actor_mac" ] && _extra="${_extra}; $(_device_action Actor lan "$_actor_mac")"
         _ntfy "Device removed — ${_iface}" default wastebasket \
 "${_DEV_DISPLAY} has been removed from ${_iface}.
 
 ${_device_detail}
 
-${_actor_info}"
+${_actor_info}" \
+            "$_extra"
         printf '<meta http-equiv="refresh" content="0;url=/cgi-bin/network?net=%s">' "$(_html "$_iface")"
         exit 0
         ;;

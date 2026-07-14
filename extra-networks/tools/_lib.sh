@@ -63,6 +63,17 @@ _ntfy() {
 Dashboard: ${_ntfy_dash}" >/dev/null &
 }
 
+# Build a ntfy "view, <label>, <url>" action linking to a device's detail page.
+# Empty (no-op) if mac is blank, so callers can splice it in unconditionally.
+# Usage: _device_action <label> <net> <mac>
+_device_action() {
+    [ -n "$3" ] || return 0
+    _da_rip=$(ip addr show br-lan 2>/dev/null \
+        | awk '/inet / { split($2,a,"/"); print a[1]; exit }')
+    printf 'view, %s, http://%s/cgi-bin/device?net=%s&mac=%s' \
+        "$1" "${_da_rip:-192.168.1.1}" "$2" "$3"
+}
+
 # Write per-device dnsmasq DNS file: dhcp-host for DHCP hostname + host-record for A/AAAA.
 # Usage: _write_device_dns iface mac slug ip4 ip6
 _write_device_dns() {
