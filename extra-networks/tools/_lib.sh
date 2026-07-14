@@ -46,14 +46,22 @@ _ip6_for_mac() {
         awk -v m="$1" '!/^fe80:/ && /lladdr/ { for(i=1;i<=NF;i++) if($i=="lladdr" && tolower($(i+1))==tolower(m)){print $1; exit} }'
 }
 
+# Router's LAN IP, for building links back into the dashboard/device pages.
+# Prefers the live address on br-lan; falls back to the UCI-configured LAN
+# address if the interface isn't up yet; 192.168.1.1 is a last-resort default
+# only used if neither source has anything.
+_router_ip() {
+    _ri=$(ip addr show br-lan 2>/dev/null | awk '/inet / { split($2,a,"/"); print a[1]; exit }')
+    [ -n "$_ri" ] || _ri=$(uci -q get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
+    printf '%s' "${_ri:-192.168.1.1}"
+}
+
 # Send a push notification via ntfy. Requires NOTIFY_URL to be set.
 # Usage: _ntfy <title> <priority> <tags> <body> [extra_action]
 # extra_action: prepended before the dashboard action, e.g. "view, Approve, URL"
 _ntfy() {
     [ -n "${NOTIFY_URL:-}" ] || return 0
-    _ntfy_rip=$(ip addr show br-lan 2>/dev/null \
-        | awk '/inet / { split($2,a,"/"); print a[1]; exit }')
-    _ntfy_dash="http://${_ntfy_rip:-192.168.1.1}/cgi-bin/status"
+    _ntfy_dash="http://$(_router_ip)/cgi-bin/status"
     curl -sf -X POST "$NOTIFY_URL" \
         -H "Title: $1" \
         -H "Priority: $2" \
@@ -61,6 +69,15 @@ _ntfy() {
         -H "Actions: ${5:+${5}; }view, Dashboard, ${_ntfy_dash}" \
         -d "$4
 Dashboard: ${_ntfy_dash}" >/dev/null &
+}
+
+# Build a ntfy "view, <label>, <url>" action linking to a device's detail page.
+# Empty (no-op) if mac is blank, so callers can splice it in unconditionally.
+# Usage: _device_action <label> <net> <mac>
+_device_action() {
+    [ -n "$3" ] || return 0
+    printf 'view, %s, http://%s/cgi-bin/device?net=%s&mac=%s' \
+        "$1" "$(_router_ip)" "$2" "$3"
 }
 
 # Write per-device dnsmasq DNS file: dhcp-host for DHCP hostname + host-record for A/AAAA.

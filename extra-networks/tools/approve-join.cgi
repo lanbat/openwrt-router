@@ -76,9 +76,6 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ] && [ "$(_get_param "$_params" action)" 
         { grep -v "^${MAC}	" "$_lbl_f" 2>/dev/null
           printf '%s\t%s\n' "$MAC" "$_safe"; } > "${_lbl_f}.tmp" \
             && mv "${_lbl_f}.tmp" "$_lbl_f" || true
-        _slug=$(_slugify "$_safe")
-        _write_device_dns "$_iface" "$MAC" "$_slug" \
-            "$(_ip4_for_mac "$MAC")" "$(_ip6_for_mac "$MAC")"
         _actor_ip="${REMOTE_ADDR:-unknown}"
         _actor_name=$(_name_for_ip "$_actor_ip")
         _actor_mac=$(_mac_for_ip "$_actor_ip")
@@ -89,6 +86,8 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ] && [ "$(_get_param "$_params" action)" 
         [ "$_actor_name" = "*" ] && _actor_name=""
         _actor_display="${_actor_name:-${_actor_ip4:-$_actor_ip}}"
         if [ "$_safe" != "$_old_label" ]; then
+            _extra="$(_device_action Device "$_iface" "$MAC")"
+            [ -n "$_actor_mac" ] && _extra="${_extra}; $(_device_action Actor lan "$_actor_mac")"
             _ntfy "Label set — ${_iface}" default pencil2 \
                 "MAC: ${MAC}${_old_label:+
 Was: ${_old_label}}
@@ -96,13 +95,19 @@ Now: ${_safe}
 
 By: ${_actor_display}${_actor_mac:+ (${_actor_mac})}
 IPv4: ${_actor_ip4:----}
-IPv6: ${_actor_ip6:----}"
+IPv6: ${_actor_ip6:----}" \
+                "$_extra"
             _join_history_add "$_iface" labelled "$MAC" \
                 "$(_ip4_for_mac "$MAC")" "$(_ip6_for_mac "$MAC")" \
                 "${_old_label:+${_old_label} → }${_safe}" \
                 "$_actor_display" "$_actor_ip4" "$_actor_ip6" "$_actor_mac" \
                 "${JOIN_HISTORY_RETENTION:-90d}"
         fi
+        # Run last: restarts dnsmasq, which drops local DNS resolution for
+        # several seconds — must happen after _ntfy's curl call resolves NOTIFY_URL.
+        _slug=$(_slugify "$_safe")
+        _write_device_dns "$_iface" "$MAC" "$_slug" \
+            "$(_ip4_for_mac "$MAC")" "$(_ip6_for_mac "$MAC")"
     fi
     printf '<meta http-equiv="refresh" content="0;url=/cgi-bin/status">'
     exit 0
@@ -144,10 +149,8 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
     _approver="${_approver_name:-$_approver_ip}"
     [ "$_approver" = "*" ] && _approver="$_approver_ip"
     [ -n "$_approver_mac" ] && _approver="${_approver} (${_approver_mac})"
-    _rip=$(ip addr show br-lan 2>/dev/null | awk '/inet / { split($2,a,"/"); print a[1]; exit }')
-    _rip="${_rip:-192.168.1.1}"
-    _approver_action=""
-    [ -n "$_approver_mac" ] && _approver_action="view, Approver, http://${_rip}/cgi-bin/device?net=lan&mac=${_approver_mac}"
+    _approver_action="$(_device_action Device "$NET" "$MAC")"
+    [ -n "$_approver_mac" ] && _approver_action="${_approver_action}; $(_device_action Approver lan "$_approver_mac")"
 
     if [ "$_action" = approve ]; then
         _label_new=$(printf '%s' "$(_get_param "$_params" label)" \
@@ -191,9 +194,6 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
         { grep -v "^${MAC}	" "$_lbl_f" 2>/dev/null
           printf '%s\t%s\n' "$MAC" "$_label_safe"; } > "${_lbl_f}.tmp" \
             && mv "${_lbl_f}.tmp" "$_lbl_f" || true
-        _slug=$(_slugify "$_label_safe")
-        _write_device_dns "$_iface" "$MAC" "$_slug" \
-            "${IP4:-$IP}" "$(_ip6_for_mac "$MAC")"
         _ntfy "Access approved — ${NET}" default white_check_mark \
 "Type: Internet access approved
 
@@ -207,6 +207,11 @@ IPv6: ${_approver_ip6:----}
 The approved device can now use the internet on ${NET}." \
 "${_approver_action}"
         _join_history_add "$NET" approved "$MAC" "$IP4" "$IP6" "${HOST:-${_dns:-unknown}}" "$_approver" "$_approver_ip4" "$_approver_ip6" "$_approver_mac" "${JOIN_HISTORY_RETENTION:-90d}"
+        # Run last: restarts dnsmasq, which drops local DNS resolution for
+        # several seconds — must happen after _ntfy's curl call resolves NOTIFY_URL.
+        _slug=$(_slugify "$_label_safe")
+        _write_device_dns "$_iface" "$MAC" "$_slug" \
+            "${IP4:-$IP}" "$(_ip6_for_mac "$MAC")"
         _msg="$(_html "${HOST:-$IP}") ($MAC) can now use the internet on ${NET}."
         _cls=ok
     else
