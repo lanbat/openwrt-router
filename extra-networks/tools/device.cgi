@@ -756,11 +756,14 @@ if [ -f "$1" ]; then
             if(actor==""&&host!="")actor=host
             cls=(act in bcls)?bcls[act]:"untracked"
             lbl=(act in blbl)?blbl[act]:h(act)
-            if(act=="labelled"&&host!="")lbl=lbl"<br><span style=\"font-weight:400;font-size:.8em;opacity:.7\">"h(host)"</span>"
             if(amac!="")by="<a href=\"/cgi-bin/device?net=lan&mac="h(amac)"\">"h(amac)"</a>"
             else by=h(actor!=""?actor:"unknown")
-            printf "<tr><td class=\"dim\">%s</td><td><span class=\"badge badge-%s\">%s</span></td><td>%s</td><td>%s</td><td>%s</td><td class=\"dim\">%s</td></tr>\n",\
-                h(rw[i]),cls,lbl,h(net),h(ri4[i]!=""?ri4[i]:"—"),h(ip6!=""?ip6:"—"),by
+            if(act=="labelled")
+                dcell="<td><span class=\"badge badge-labelled\">Labelled</span>"(host!=""?" <span class=\"dim\" style=\"font-size:.82rem\">"h(host)"</span>":"")  "</td>"
+            else
+                dcell="<td><span class=\"badge badge-"cls"\">"lbl"</span></td>"
+            printf "<tr><td class=\"dim\">%s</td>%s<td>%s</td><td>%s</td><td>%s</td><td class=\"dim\">%s</td></tr>\n",\
+                h(rw[i]),dcell,h(net),h(ri4[i]!=""?ri4[i]:"—"),h(ip6!=""?ip6:"—"),by
         }
     }' "$@" 2>/dev/null)
 fi
