@@ -113,6 +113,7 @@ Config files live in `configs/` and are gitignored — they never leave the rout
 | `MDNS` | `no` | Reflect mDNS between LAN and this network; installs avahi-daemon if absent |
 | `NOTIFY_URL` | — | ntfy.sh URL for push notifications, e.g. `https://ntfy.sh/my-topic` |
 | `NOTIFY_JOIN` | `no` | Send a push notification each time a device gets a DHCP lease |
+| `REJOIN_NOTIFY_AFTER` | — | Send a notification when a known device reconnects after being absent for at least this long — e.g. `7d`, `12h`; blank to disable |
 | `JOIN_APPROVAL` | `no` | Block internet for new devices until you approve them via push notification (requires `NOTIFY_URL`) |
 | `JOIN_HISTORY_RETENTION` | `90d` | Keep join approval, denial, and revocation history this long; plain numbers mean days |
 | `DEVICE_CONTROL` | `no` | Per-device outbound control — each approved device must explicitly allow every destination domain or IP it tries to reach; requires `JOIN_APPROVAL=yes`; see [Per-device control](#per-device-control) |
@@ -177,6 +178,7 @@ All notifications include a link to the status dashboard. LAN access requests in
 | Event | Trigger | Priority |
 |---|---|---|
 | New device joined | Device gets a DHCP lease (when `NOTIFY_JOIN=yes`) | Low |
+| Device reconnected | Known device returns after being absent for `REJOIN_NOTIFY_AFTER` or longer | Low |
 | Join request | New device needs internet approval (when `JOIN_APPROVAL=yes`) | Default |
 | Join approved | Device internet access approved via web form | Default |
 | Join denied | Device internet access denied via web form | Default |
@@ -248,7 +250,7 @@ Every device with a label has a dedicated management page — not just DEVICE_CO
 
 | Section | Available when | What it shows |
 |---|---|---|
-| Device | Always | MAC, tracked IPv4/IPv6, network, DNS name, join approval state and actions |
+| Device | Always | Label, manufacturer (from OUI database; shows "Randomized MAC" for privacy MACs), MAC, tracked IPv4/IPv6, network, DNS name, join approval state and actions |
 | Connection rate limit | Always | New-connection cap per minute (default 120); configurable per device |
 | Approve domain | `DEVICE_CONTROL=yes` | Add a hostname allow rule |
 | Pending connections | `DEVICE_CONTROL=yes` | Blocked outbound attempts — Allow / Deny each |
@@ -263,7 +265,7 @@ Every device's new-connection rate is capped to prevent port scans and misbehavi
 
 **Per-device DNS names**
 
-When a device is labeled — either at approval time or later via the device page — its label is slugified and registered in dnsmasq. A device labeled "Alice's Phone" becomes reachable at `alices-phone.lan` from the rest of the LAN. The DNS entry is written to `/etc/dnsmasq.d/<iface>-dns-<mac>.conf` and survives reboots. Re-labeling a device updates the entry immediately.
+When a device is labeled — either at approval time or later via the device page — its label is registered in dnsmasq. Labels accept any text: Unicode, accented characters, emoji, whatever is useful to you. The DNS hostname is derived automatically by lowercasing the label and replacing non-alphanumeric characters with hyphens, so "Alice's Phone" becomes reachable at `alices-phone.lan` from the rest of the LAN. If the label produces an empty hostname (e.g. a label made entirely of symbols), DNS registration is silently skipped — the device still has a label in the dashboard. The DNS entry is written to `/etc/dnsmasq.d/<iface>-dns-<mac>.conf` and survives reboots. Re-labeling a device updates the entry immediately.
 
 ### Bandwidth alerts
 
@@ -280,16 +282,7 @@ Sent every morning at 08:00. Includes:
 - **Traffic** — ↓/↑ totals, connected device count (active DHCP leases), active LAN access rule count per network
 - **Blocked counts** — LAN access requests and allowlist rejections logged since boot
 - **Expiring rules** — any temporary LAN access rules expiring today or tomorrow
-- **Calendar events** — upcoming events for the next 7 days (if `GCAL_URL` is configured)
-
-To enable calendar integration, set in `/etc/extra-networks/config`:
-
-```sh
-GCAL_URL=https://calendar.google.com/calendar/ical/<your-calendar-id>/basic.ics
-GCAL_TZ_OFFSET=1   # hours offset from UTC for time display
-```
-
-Recurring events (weekly, biweekly) are expanded correctly — the ICS start date is no barrier.
+- **Calendar events** — upcoming events for the next 7 days (if `GCAL_URL` is configured — see [Global settings](#global-settings)); recurring weekly and biweekly events are expanded correctly
 
 ### Including the main LAN in the digest
 
@@ -349,9 +342,10 @@ http://192.168.1.1/cgi-bin/status
 The page auto-refreshes every 60 seconds and shows:
 
 - **System** — uptime, memory, load, WAN IPv4/IPv6
+- **WiFi** — one row per radio showing band (2.4 / 5 / 6 GHz), channel, and VAP count; highlighted in amber if any VAPs are missing
 - **VPN** — interface and state (up / down / routing fault)
 - **WireGuard server peers** — auto-detected for any WireGuard interface in server mode (no outbound peers); shows all configured peers with an online indicator (● / ○), endpoint IP, last handshake, and bytes transferred
-- **Networks** — state, subnet, traffic (↓/↑), connected devices with hostname, IP, MAC, join approval state, recent join decision history, and per-device traffic. An IPv6 column appears automatically when the network has IPv6 configured or clients have IPv6 addresses.
+- **Networks** — for each network: state, subnet, IPv6 prefix, traffic (↓/↑), device count, DNS, rate limits, isolation settings, join alert state, and which WiFi VAP carries it (interface name, channel, band). Followed by a device table with hostname, IP, MAC, join approval state, recent join decisions, and per-device traffic. An IPv6 column appears automatically when the network has IPv6 configured or clients with IPv6 addresses are present.
 - **Pending LAN access** — blocked isolated→LAN connection attempts logged since the last check, with **Approve** buttons linking directly to the approval form
 - **Active LAN access** — temporary allowances in both directions (LAN→isolated and isolated→LAN) with destination, port, protocol, and time remaining
 - **Port forwards** — active redirects with zone, port, destination, and expiry
@@ -359,6 +353,8 @@ The page auto-refreshes every 60 seconds and shows:
 - **WiFi QR codes** — SSID, password, and scannable QR code per network (when `SHOW_QR=yes`)
 
 Only reachable from LAN — isolated zones have `INPUT=REJECT`.
+
+To disable the 60-second auto-refresh, add `STATUS_AUTOREFRESH=no` to `/etc/extra-networks/config` on the router. The "Refresh" link at the top of the page always works regardless of this setting.
 
 ## VLAN trunk
 
@@ -530,6 +526,47 @@ sh tools/guest-info.sh configs/guest.conf
 The page is served by the router's built-in web server (uhttpd). Isolated network zones have `INPUT=REJECT`, so guests and IoT devices cannot access it — only LAN devices can.
 
 Re-run after rotating the password to update the page.
+
+### OUI database (manufacturer lookup)
+
+The device page shows the hardware manufacturer for each device based on its MAC address OUI prefix. The database is downloaded from four sources and merged:
+
+| Source | Coverage |
+|---|---|
+| Wireshark manuf | Most complete — community-maintained, all prefix lengths |
+| IEEE MA-L | 24-bit OUI blocks (standard) |
+| IEEE MA-M | 28-bit OUI blocks (large vendors with sub-ranges) |
+| IEEE MA-S | 36-bit OUI blocks (product-line level) |
+
+The database is refreshed automatically every Sunday at 03:00. To refresh it manually:
+
+```sh
+sh /etc/extra-networks/oui-update.sh
+```
+
+**Randomized MACs:** Modern phones and laptops randomize their MAC address per network for privacy. These MACs have the locally-administered bit set (second bit of the first byte) and have no OUI entry by design — the device page shows "Randomized MAC" for them instead of a blank.
+
+## Global settings
+
+Some settings apply to the status page and tools as a whole rather than to a single network. Set them in `/etc/extra-networks/config` on the router — this file is created by `install.sh` and survives re-runs.
+
+| Setting | Default | Description |
+|---|---|---|
+| `STATUS_AUTOREFRESH` | `yes` | Set to `no` to disable the 60-second auto-refresh on the status page |
+| `GCAL_URL` | — | Google Calendar `.ics` URL — when set, the daily digest includes upcoming events for the next 7 days |
+| `GCAL_TZ_OFFSET` | `0` | Hours offset from UTC for event time display in the digest |
+
+Example:
+
+```sh
+# /etc/extra-networks/config
+REPO_DIR=/root/openwrt-router/extra-networks
+STATUS_AUTOREFRESH=no
+GCAL_URL=https://calendar.google.com/calendar/ical/<your-calendar-id>/basic.ics
+GCAL_TZ_OFFSET=1
+```
+
+To get your calendar's `.ics` URL: open Google Calendar → Settings → the calendar you want → "Integrate calendar" → copy the **Secret address in iCal format** link. Keep it private — anyone with the URL can read your calendar.
 
 ## Adding a new network
 
