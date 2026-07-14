@@ -149,8 +149,6 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
     _approver="${_approver_name:-$_approver_ip}"
     [ "$_approver" = "*" ] && _approver="$_approver_ip"
     [ -n "$_approver_mac" ] && _approver="${_approver} (${_approver_mac})"
-    _rip=$(ip addr show br-lan 2>/dev/null | awk '/inet / { split($2,a,"/"); print a[1]; exit }')
-    _rip="${_rip:-192.168.1.1}"
     _approver_action="$(_device_action Device "$NET" "$MAC")"
     [ -n "$_approver_mac" ] && _approver_action="${_approver_action}; $(_device_action Approver lan "$_approver_mac")"
 
