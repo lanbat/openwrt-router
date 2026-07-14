@@ -67,16 +67,15 @@ _iface="${IFACE_NAME:-$NET}"
 if [ "${REQUEST_METHOD:-GET}" = "POST" ] && [ "$(_get_param "$_params" action)" = set_label ]; then
     _new=$(printf '%s' "$(_get_param "$_params" label)" \
         | sed 's/+/ /g;s/^[[:space:]]*//;s/[[:space:]]*$//' | head -c 40)
-    _safe=$(printf '%s' "$_new" | sed "s/[^a-zA-Z0-9 _.'-]//g")
-    if [ -n "$_safe" ]; then
+    if [ -n "$_new" ]; then
         _lbl_f="${BASE_DIR}/${NET}-device-labels"
         _old_label=$(awk -v m="$MAC" \
             'tolower($1)==tolower(m){sub(/^[^\t]+\t/,""); print; exit}' \
             "$_lbl_f" 2>/dev/null || true)
         { grep -v "^${MAC}	" "$_lbl_f" 2>/dev/null
-          printf '%s\t%s\n' "$MAC" "$_safe"; } > "${_lbl_f}.tmp" \
+          printf '%s\t%s\n' "$MAC" "$_new"; } > "${_lbl_f}.tmp" \
             && mv "${_lbl_f}.tmp" "$_lbl_f" || true
-        _slug=$(_slugify "$_safe")
+        _slug=$(_slugify "$_new")
         _write_device_dns "$_iface" "$MAC" "$_slug" \
             "$(_ip4_for_mac "$MAC")" "$(_ip6_for_mac "$MAC")"
         _actor_ip="${REMOTE_ADDR:-unknown}"
@@ -88,18 +87,18 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ] && [ "$(_get_param "$_params" action)" 
         esac
         [ "$_actor_name" = "*" ] && _actor_name=""
         _actor_display="${_actor_name:-${_actor_ip4:-$_actor_ip}}"
-        if [ "$_safe" != "$_old_label" ]; then
+        if [ "$_new" != "$_old_label" ]; then
             _ntfy "Label set — ${_iface}" default pencil2 \
                 "MAC: ${MAC}${_old_label:+
 Was: ${_old_label}}
-Now: ${_safe}
+Now: ${_new}
 
 By: ${_actor_display}${_actor_mac:+ (${_actor_mac})}
 IPv4: ${_actor_ip4:----}
 IPv6: ${_actor_ip6:----}"
             _join_history_add "$_iface" labelled "$MAC" \
                 "$(_ip4_for_mac "$MAC")" "$(_ip6_for_mac "$MAC")" \
-                "${_old_label:+${_old_label} → }${_safe}" \
+                "${_old_label:+${_old_label} → }${_new}" \
                 "$_actor_display" "$_actor_ip4" "$_actor_ip6" "$_actor_mac" \
                 "${JOIN_HISTORY_RETENTION:-90d}"
         fi
@@ -152,13 +151,12 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
     if [ "$_action" = approve ]; then
         _label_new=$(printf '%s' "$(_get_param "$_params" label)" \
             | sed 's/+/ /g;s/^[[:space:]]*//;s/[[:space:]]*$//' | head -c 40)
-        _label_safe=$(printf '%s' "$_label_new" | sed "s/[^a-zA-Z0-9 _.'-]//g")
-        if [ -z "$_label_safe" ]; then
-            _label_safe=$(awk -v m="$MAC" \
+        if [ -z "$_label_new" ]; then
+            _label_new=$(awk -v m="$MAC" \
                 'tolower($1)==tolower(m){sub(/^[^\t]+\t/,""); print; exit}' \
                 "${BASE_DIR}/${NET}-device-labels" 2>/dev/null || true)
         fi
-        [ -n "$_label_safe" ] || { printf '<h1>Label is required to approve a device</h1>'; exit 0; }
+        [ -n "$_label_new" ] || { printf '<h1>Label is required to approve a device</h1>'; exit 0; }
         { grep -vF "$MAC" "$APPROVED_FILE" 2>/dev/null; printf '%s\n' "$MAC"; } \
             >"${APPROVED_FILE}.tmp" && mv "${APPROVED_FILE}.tmp" "$APPROVED_FILE" || true
         { grep -v "^${MAC} " "$PENDING_FILE" 2>/dev/null; } \
@@ -189,9 +187,9 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
         fi
         _lbl_f="${BASE_DIR}/${NET}-device-labels"
         { grep -v "^${MAC}	" "$_lbl_f" 2>/dev/null
-          printf '%s\t%s\n' "$MAC" "$_label_safe"; } > "${_lbl_f}.tmp" \
+          printf '%s\t%s\n' "$MAC" "$_label_new"; } > "${_lbl_f}.tmp" \
             && mv "${_lbl_f}.tmp" "$_lbl_f" || true
-        _slug=$(_slugify "$_label_safe")
+        _slug=$(_slugify "$_label_new")
         _write_device_dns "$_iface" "$MAC" "$_slug" \
             "${IP4:-$IP}" "$(_ip6_for_mac "$MAC")"
         _ntfy "Access approved — ${NET}" default white_check_mark \

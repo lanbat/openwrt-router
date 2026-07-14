@@ -149,23 +149,22 @@ IPv6: ${_actor_ip6:----}"
     set_label)
         _new=$(printf '%s' "$(_get_param "$_params" label)" \
             | sed 's/+/ /g;s/^[[:space:]]*//;s/[[:space:]]*$//' | head -c 40)
-        _safe=$(printf '%s' "$_new" | sed "s/[^a-zA-Z0-9 _.'-]//g")
-        if [ -n "$_safe" ]; then
+        if [ -n "$_new" ]; then
             mkdir -p "$BASE_DIR"
-            _upsert "$_labels_f" "$MAC" "$_safe"
-            _slug=$(_slugify "$_safe")
+            _upsert "$_labels_f" "$MAC" "$_new"
+            _slug=$(_slugify "$_new")
             _write_device_dns "$_iface" "$MAC" "$_slug" \
                 "${_DEV_IP:-$(_ip4_for_mac "$MAC")}" "${_DEV_IP6:-$(_ip6_for_mac "$MAC")}"
-            if [ "$_safe" != "$_DEV_LABEL" ]; then
+            if [ "$_new" != "$_DEV_LABEL" ]; then
                 _ntfy "Label set — ${_iface}" default pencil2 \
                     "MAC: ${MAC}${_DEV_LABEL:+
 Was: ${_DEV_LABEL}}
-Now: ${_safe}
+Now: ${_new}
 
 ${_actor_info}"
                 _join_history_add "$_iface" labelled "$MAC" \
                     "${_DEV_IP:-$(_ip4_for_mac "$MAC")}" "${_DEV_IP6:-$(_ip6_for_mac "$MAC")}" \
-                    "${_DEV_LABEL:+${_DEV_LABEL} → }${_safe}" \
+                    "${_DEV_LABEL:+${_DEV_LABEL} → }${_new}" \
                     "$_actor_display" "$_actor_ip4" "$_actor_ip6" "$_actor_mac" \
                     "${JOIN_HISTORY_RETENTION:-90d}"
             fi
