@@ -18,7 +18,12 @@ grep -qF "$BASE_DIR" /etc/sysupgrade.conf 2>/dev/null || printf '%s\n' "$BASE_DI
 
 # Store repo location so tools can reference each other by absolute path
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-printf 'REPO_DIR=%s\n' "$SCRIPT_DIR" > "${BASE_DIR}/config"
+_gcfg="${BASE_DIR}/config"
+if [ -f "$_gcfg" ] && grep -q '^REPO_DIR=' "$_gcfg"; then
+    sed -i "s|^REPO_DIR=.*|REPO_DIR=${SCRIPT_DIR}|" "$_gcfg"
+else
+    printf 'REPO_DIR=%s\n' "$SCRIPT_DIR" >> "$_gcfg"
+fi
 
 RADIO="${RADIO:-radio0}"
 RADIO_EXTRA="${RADIO_EXTRA:-}"

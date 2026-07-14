@@ -5,6 +5,7 @@
 
 BASE_DIR=/etc/extra-networks
 [ -f "${BASE_DIR}/_lib.sh" ] && . "${BASE_DIR}/_lib.sh"
+[ -f "${BASE_DIR}/config"  ] && . "${BASE_DIR}/config"
 
 printf 'Content-Type: text/html\r\n\r\n'
 
@@ -49,7 +50,7 @@ _crontab=$(crontab -l 2>/dev/null)
 cat <<HTML
 <!DOCTYPE html><html><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="60">
+$([ "${STATUS_AUTOREFRESH:-yes}" != no ] && printf '<meta http-equiv="refresh" content="60">')
 <title>Status — ${hostname}</title>
 <style>
 :root{color-scheme:light}
