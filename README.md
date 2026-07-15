@@ -18,19 +18,31 @@ dnsmasq-based lazy resolution, and daily auto-updates.
 
 ## Install
 
-Clone onto the router and run the top-level installer:
-
 ```sh
 git clone <repo-url> /root/openwrt-router
 cd /root/openwrt-router
-sh install.sh
 ```
 
-To install only one sub-project:
+**extra-networks** requires a config file per network. Copy the examples and fill in at minimum `WIFI_KEY`, `SSID`, and `SUBNET`:
 
 ```sh
-sh install.sh extra-networks
-sh install.sh split-routing
+cp extra-networks/configs/guest.conf.example     extra-networks/configs/guest.conf
+cp extra-networks/configs/untrusted.conf.example extra-networks/configs/untrusted.conf
+vi extra-networks/configs/guest.conf
+vi extra-networks/configs/untrusted.conf
+```
+
+Then install each network:
+
+```sh
+sh extra-networks/install.sh extra-networks/configs/guest.conf
+sh extra-networks/install.sh extra-networks/configs/untrusted.conf
+```
+
+**split-routing** reads its own config from `/etc/split-routing/` and needs no argument:
+
+```sh
+sh split-routing/install.sh
 ```
 
 ## Upgrading OpenWrt

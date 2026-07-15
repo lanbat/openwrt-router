@@ -56,17 +56,20 @@ cd openwrt-extra-networks
 ### 2. Create a config
 
 ```sh
-cp configs/guest.conf.example configs/guest.conf
-vi configs/guest.conf   # set WIFI_KEY, SSID, and anything else
+cp configs/guest.conf.example     configs/guest.conf
+cp configs/untrusted.conf.example configs/untrusted.conf
+vi configs/guest.conf      # set WIFI_KEY, SSID, SUBNET, and anything else
+vi configs/untrusted.conf
 ```
 
 ### 3. Install
 
 ```sh
 sh install.sh configs/guest.conf
+sh install.sh configs/untrusted.conf
 ```
 
-Repeat for each network you want.
+Run `install.sh` once per network. To add another network later, copy any example, edit it, and run `install.sh` with that file.
 
 ## Configuration
 
