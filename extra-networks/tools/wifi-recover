@@ -8,8 +8,8 @@ _recover_phy() {
     _phy="$1"; _hconf="$2"
     _attempt=0
     while [ "$_attempt" -lt 5 ]; do
-        iw dev 2>/dev/null | grep -q "Interface ${_phy}-" && return 0
-        logger -t wifi-recover "${_phy}: no VAPs up (attempt $((_attempt+1))), recovering via hostapd config_set"
+        iw dev 2>/dev/null | grep -q "Interface ${_phy}-ap0" && return 0
+        logger -t wifi-recover "${_phy}: primary VAP missing (attempt $((_attempt+1))), recovering via hostapd config_set"
         ubus call hostapd config_set \
             "{\"phy\":\"${_phy}\",\"radio\":-1,\"config\":\"${_hconf}\",\"prev_config\":\"${_hconf}.prev\"}" \
             >/dev/null 2>&1 || true
@@ -24,7 +24,7 @@ start() {
     for _hconf in /var/run/hostapd-*.conf; do
         [ -f "$_hconf" ] || continue
         _phy="${_hconf##*/hostapd-}"; _phy="${_phy%.conf}"
-        iw dev 2>/dev/null | grep -q "Interface ${_phy}-" && continue
+        iw dev 2>/dev/null | grep -q "Interface ${_phy}-ap0" && continue
         _recover_phy "$_phy" "$_hconf"
     done
 }

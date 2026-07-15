@@ -18,9 +18,8 @@ mkdir "$_lock" 2>/dev/null || exit 0
     # Brief pause so all VAPs from the same reload batch have time to go down
     sleep 3
 
-    # If phy0 already has VAPs (e.g. this was a single-VAP flap, not the race),
-    # there is nothing to do
-    if iw dev 2>/dev/null | grep -q 'Interface phy0-'; then
+    # If phy0's primary VAP is already up (e.g. a secondary-only flap), nothing to do
+    if iw dev 2>/dev/null | grep -q 'Interface phy0-ap0'; then
         rmdir "$_lock"
         exit 0
     fi
@@ -30,7 +29,7 @@ mkdir "$_lock" 2>/dev/null || exit 0
 
     _attempt=0
     while [ "$_attempt" -lt 5 ]; do
-        iw dev 2>/dev/null | grep -q 'Interface phy0-' && break
+        iw dev 2>/dev/null | grep -q 'Interface phy0-ap0' && break
         logger -t wifi-recover "phy0: no VAPs up mid-session (attempt $((_attempt+1))), recovering"
         ubus call hostapd config_set \
             "{\"phy\":\"phy0\",\"radio\":-1,\"config\":\"${_hconf}\",\"prev_config\":\"${_hconf}.prev\"}" \
