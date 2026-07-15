@@ -68,8 +68,10 @@ if [ -f "$_labels" ] && { [ -f "$_ips" ] || [ -f "$_ip6s" ]; }; then
     done < "$_labels"
 fi
 
-printf '    iifname "br-%s" ct state new log prefix "EXTNET-%s-NEW: " level info drop\n' \
-    "$_iface" "$_iface"
+if [ -f "$_labels" ] && { [ -f "$_ips" ] || [ -f "$_ip6s" ]; }; then
+    printf '    iifname "br-%s" ct state new limit rate 60/minute log prefix "EXTNET-%s-NEW: " level info drop\n' \
+        "$_iface" "$_iface"
+fi
 printf '}\n'
 } > "$_nftd"
 
