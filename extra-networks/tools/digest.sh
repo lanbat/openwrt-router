@@ -79,17 +79,18 @@ if [ -n "${GCAL_URL:-}" ]; then
                 if (ev && sm!="") {
                     dpart=substr(dt,1,8)
                     if (rrule!="") {
-                        freq=""; interval=1
+                        freq=""; interval=1; until=""
                         if(match(rrule,/FREQ=[A-Z]+/)){tmp=substr(rrule,RSTART,RLENGTH);sub(/FREQ=/,"",tmp);freq=tmp}
                         if(match(rrule,/INTERVAL=[0-9]+/)){tmp=substr(rrule,RSTART,RLENGTH);sub(/INTERVAL=/,"",tmp);interval=tmp+0}
+                        if(match(rrule,/UNTIL=[0-9]+/)){tmp=substr(rrule,RSTART,RLENGTH);sub(/UNTIL=/,"",tmp);until=substr(tmp,1,8)}
                         if (freq=="WEEKLY") {
                             step=interval*7*86400; base=ymd_epoch(dpart)
+                            win_start_day=strftime("%Y%m%d",win_start)
                             diff=win_start-base; k=(diff>0)?int(diff/step):0
-                            occ=base+k*step; if(occ<win_start)occ+=step
-                            if (occ<=win_end) {
-                                occ_day=strftime("%Y%m%d",occ)
-                                if(occ_day in dmap){split(tparts(dt),tp,"\t");print occ_day "T" tp[1] "\t" dmap[occ_day] " — " sm " (" tp[2] ")"}
-                            }
+                            occ=base+k*step
+                            occ_day=strftime("%Y%m%d",occ)
+                            if(occ_day < win_start_day){occ+=step; occ_day=strftime("%Y%m%d",occ)}
+                            if(occ_day in dmap && (until=="" || occ_day<=until)){split(tparts(dt),tp,"\t");print occ_day "T" tp[1] "\t" dmap[occ_day] " — " sm " (" tp[2] ")"}
                         }
                     } else {
                         if (dpart in dmap) {
