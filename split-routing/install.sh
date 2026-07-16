@@ -271,12 +271,15 @@ NFTD=/etc/nftables.d/30-split-routing.nft
 mkdir -p /etc/nftables.d
 
 # Collect extra-network bridges — their traffic is never VPN-marked.
+# Skip the primary LAN (br-lan): it IS the network we want to mark.
 _excl_ifaces=""
 for _nc in /etc/extra-networks/*-notify.conf; do
   [ -f "$_nc" ] || continue
   unset IFACE_NAME
   . "$_nc"
-  [ -n "${IFACE_NAME:-}" ] && _excl_ifaces="${_excl_ifaces} br-${IFACE_NAME}"
+  [ -n "${IFACE_NAME:-}" ] || continue
+  [ "$IFACE_NAME" = lan ] && continue
+  _excl_ifaces="${_excl_ifaces} br-${IFACE_NAME}"
 done
 
 {
