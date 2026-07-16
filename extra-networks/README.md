@@ -572,7 +572,7 @@ Example:
 
 ```sh
 # /etc/extra-networks/config
-REPO_DIR=/root/openwrt-router/extra-networks
+REPO_DIR=/root/openwrt-kestrel/extra-networks
 STATUS_AUTOREFRESH=no
 GCAL_URL=https://calendar.google.com/calendar/ical/<your-calendar-id>/basic.ics
 GCAL_TZ_OFFSET=1

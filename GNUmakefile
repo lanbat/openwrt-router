@@ -1,4 +1,4 @@
-# GNUmakefile — build, package, and release the openwrt-router Rust binaries
+# GNUmakefile — build, package, and release the openwrt-kestrel Rust binaries
 #
 # Produces both .apk (OpenWrt snapshot) and .ipk (OpenWrt stable) containing:
 #   /usr/bin/kestreld    — HTTP status/device daemon (extra-networks/kestreld-rs)

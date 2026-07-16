@@ -1,4 +1,4 @@
-# openwrt-router
+# openwrt-kestrel
 
 Two cooperating toolkits for OpenWrt routers, managed from a single repo: one segments your WiFi into isolated trust zones with approval workflows and live monitoring, the other selectively routes traffic through a VPN by domain or category instead of tunneling everything.
 
@@ -21,8 +21,8 @@ Supplementary docs: [supported formats](split-routing/docs/supported-formats.md)
 ## Install
 
 ```sh
-git clone <repo-url> /root/openwrt-router
-cd /root/openwrt-router
+git clone <repo-url> /root/openwrt-kestrel
+cd /root/openwrt-kestrel
 ```
 
 **extra-networks** requires a config file per network. Copy the examples and fill in at minimum `WIFI_KEY`, `SSID`, and `SUBNET`:
@@ -57,7 +57,7 @@ The installer adds paths to `/etc/sysupgrade.conf` and packages add their own pa
 
 | Path | Contents |
 |---|---|
-| `/root/` | git repo (`/root/openwrt-router/`) |
+| `/root/` | git repo (`/root/openwrt-kestrel/`) |
 | `/etc/config/` | all UCI config — network, WireGuard, firewall, DHCP |
 | `/etc/extra-networks/` | device data, labels, history, join lists |
 | `/etc/dnsmasq.d/` | split-routing and content-filter configs |
@@ -89,7 +89,7 @@ apk add dnsmasq-full
 **Re-run the installers.** This redeploys the CGI scripts and init.d services (wifi-recover, extra-networks-reboot) that live outside the preserved paths:
 
 ```sh
-cd /root/openwrt-router
+cd /root/openwrt-kestrel
 sh extra-networks/install.sh extra-networks/configs/guest.conf
 sh extra-networks/install.sh extra-networks/configs/untrusted.conf
 sh split-routing/install.sh

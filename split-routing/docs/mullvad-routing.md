@@ -49,7 +49,7 @@ Each `vpn-*.conf` is fully self-contained. Adding a new VPN tier means creating 
 ## Step 1 — Install
 
 ```sh
-sh /root/openwrt-router/split-routing/install.sh
+sh /root/openwrt-kestrel/split-routing/install.sh
 ```
 
 This creates `/etc/split-routing/config` (shared settings) and copies any `vpn-*.conf` templates from the repo that don't already exist on the router.
