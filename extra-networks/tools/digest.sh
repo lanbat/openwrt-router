@@ -138,33 +138,34 @@ if [ -d /etc/split-routing ]; then
     _log=$(cat /tmp/routing-sets.log 2>/dev/null)
     for _conf in /etc/split-routing/vpn-*.conf; do
         [ -f "$_conf" ] || continue
+        _tier=$(basename "$_conf" .conf | sed 's/^vpn-//')
         unset VPN_IFACE DNS_CATS RESOLVE_CATS
         . "$_conf"
         for _c in ${DNS_CATS:-}; do
             _sets_any=1
-            _n=$(printf '%s\n' "$_log" | grep -A3 "==> dns ${_c}$" \
+            _n=$(printf '%s\n' "$_log" | grep -A3 "==> dns ${_tier}_${_c}$" \
                  | awk '/^Domains:/{print $2+0; exit}')
             if [ -n "$_n" ] && [ "$_n" -gt 0 ]; then
-                _sets_bullets="${_sets_bullets}• ${_c}: ${_n} domains
+                _sets_bullets="${_sets_bullets}• ${_tier}_${_c}: ${_n} domains
 "
             else
-                _sets_bullets="${_sets_bullets}• ${_c}: empty
+                _sets_bullets="${_sets_bullets}• ${_tier}_${_c}: empty
 "
             fi
         done
         for _c in ${RESOLVE_CATS:-}; do
             _sets_any=1
-            _n=$(printf '%s\n' "$_log" | grep -A5 "==> resolve ${_c}$" \
+            _n=$(printf '%s\n' "$_log" | grep -A5 "==> resolve ${_tier}_${_c}$" \
                  | awk '/^IPv4 set/{print $4+0; exit}')
-            _parsed=$(printf '%s\n' "$_log" | grep -A5 "==> resolve ${_c}$" \
+            _parsed=$(printf '%s\n' "$_log" | grep -A5 "==> resolve ${_tier}_${_c}$" \
                       | awk '/^Domains parsed:/{print $3+0; exit}')
             if [ "${_parsed:-0}" -eq 0 ]; then
                 continue  # no sources configured, skip
             elif [ -n "$_n" ] && [ "$_n" -gt 0 ]; then
-                _sets_bullets="${_sets_bullets}• ${_c}: ${_n} IPs
+                _sets_bullets="${_sets_bullets}• ${_tier}_${_c}: ${_n} IPs
 "
             else
-                _sets_bullets="${_sets_bullets}• ${_c}: empty
+                _sets_bullets="${_sets_bullets}• ${_tier}_${_c}: empty
 "
             fi
         done
