@@ -173,3 +173,118 @@ pub fn human_bytes(b: u64) -> String {
         format!("{b} B")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── human_bytes ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn human_bytes_bytes() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(512), "512 B");
+        assert_eq!(human_bytes(1023), "1023 B");
+    }
+
+    #[test]
+    fn human_bytes_kilobytes() {
+        assert_eq!(human_bytes(1024), "1.0 KB");
+        assert_eq!(human_bytes(2048), "2.0 KB");
+    }
+
+    #[test]
+    fn human_bytes_megabytes() {
+        assert_eq!(human_bytes(1_048_576), "1.0 MB");
+        assert_eq!(human_bytes(5 * 1_048_576), "5.0 MB");
+    }
+
+    #[test]
+    fn human_bytes_gigabytes() {
+        assert_eq!(human_bytes(1_073_741_824), "1.0 GB");
+        assert_eq!(human_bytes(2 * 1_073_741_824), "2.0 GB");
+    }
+
+    // ── format_ago ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn format_ago_seconds() {
+        assert_eq!(format_ago(0), "0s ago");
+        assert_eq!(format_ago(45), "45s ago");
+        assert_eq!(format_ago(59), "59s ago");
+    }
+
+    #[test]
+    fn format_ago_minutes() {
+        assert_eq!(format_ago(60), "1m ago");
+        assert_eq!(format_ago(90), "1m ago");
+        assert_eq!(format_ago(3599), "59m ago");
+    }
+
+    #[test]
+    fn format_ago_hours() {
+        assert_eq!(format_ago(3600), "1h ago");
+        assert_eq!(format_ago(7200), "2h ago");
+        assert_eq!(format_ago(86399), "23h ago");
+    }
+
+    #[test]
+    fn format_ago_days() {
+        assert_eq!(format_ago(86400), "1d ago");
+        assert_eq!(format_ago(7 * 86400), "7d ago");
+    }
+
+    // ── uci_get ───────────────────────────────────────────────────────────────
+
+    const UCI_RAW: &str = "\
+network.wg0.proto='wireguard'
+network.@wireguard_wg0[0].public_key='AAABBBCCC'
+network.@wireguard_wg0[0].description='laptop'
+network.@wireguard_wg0[0].allowed_ips='10.200.0.2/32'
+network.@wireguard_wg0[1].public_key='DDDEEEFFF'
+network.@wireguard_wg0[1].allowed_ips='10.200.0.3/32'
+";
+
+    #[test]
+    fn uci_get_basic() {
+        assert_eq!(uci_get(UCI_RAW, "network.@wireguard_wg0[0].public_key"), "AAABBBCCC");
+    }
+
+    #[test]
+    fn uci_get_description() {
+        assert_eq!(uci_get(UCI_RAW, "network.@wireguard_wg0[0].description"), "laptop");
+    }
+
+    #[test]
+    fn uci_get_missing_returns_empty() {
+        assert_eq!(uci_get(UCI_RAW, "network.@wireguard_wg0[2].public_key"), "");
+    }
+
+    #[test]
+    fn uci_get_proto() {
+        assert_eq!(uci_get(UCI_RAW, "network.wg0.proto"), "wireguard");
+    }
+
+    // ── is_server ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn is_server_true_when_no_endpoint_host() {
+        // None of the peers have endpoint_host
+        assert!(is_server("wg0", UCI_RAW));
+    }
+
+    #[test]
+    fn is_server_false_when_peer_has_endpoint_host() {
+        let uci = "\
+network.@wireguard_wg0[0].public_key='AAABBBCCC'
+network.@wireguard_wg0[0].endpoint_host='vpn.example.com'
+";
+        assert!(!is_server("wg0", uci));
+    }
+
+    #[test]
+    fn is_server_true_when_no_peers() {
+        // No peers means server with no clients
+        assert!(is_server("wg0", "network.wg0.proto='wireguard'\n"));
+    }
+}

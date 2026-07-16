@@ -166,3 +166,110 @@ fn freq_to_band(freq: u32) -> &'static str {
         ""
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── freq_to_band ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn band_2ghz() {
+        assert_eq!(freq_to_band(2412), "2.4 GHz");
+        assert_eq!(freq_to_band(2472), "2.4 GHz");
+    }
+
+    #[test]
+    fn band_5ghz() {
+        assert_eq!(freq_to_band(5180), "5 GHz");
+        assert_eq!(freq_to_band(5825), "5 GHz");
+    }
+
+    #[test]
+    fn band_6ghz() {
+        assert_eq!(freq_to_band(6135), "6 GHz");
+    }
+
+    #[test]
+    fn band_unknown() {
+        assert_eq!(freq_to_band(0), "");
+        assert_eq!(freq_to_band(3500), "");
+    }
+
+    // ── parse ─────────────────────────────────────────────────────────────────
+
+    const IW_SAMPLE: &str = "\
+phy#0
+\tInterface wlan0
+\t\tchannel 6 (2437 MHz), width: 20 MHz, center1: 2437 MHz
+\tInterface wlan0-1
+\t\tchannel 6 (2437 MHz), width: 20 MHz, center1: 2437 MHz
+phy#1
+\tInterface wlan1
+\t\tchannel 36 (5180 MHz), width: 80 MHz, center1: 5210 MHz
+";
+
+    const UCI_SAMPLE: &str = "\
+wireless.@wifi-iface[0].device='radio0'
+wireless.@wifi-iface[1].device='radio0'
+wireless.@wifi-iface[2].device='radio1'
+";
+
+    #[test]
+    fn parse_two_radios() {
+        let state = parse(IW_SAMPLE, UCI_SAMPLE);
+        assert_eq!(state.phys.len(), 2);
+    }
+
+    #[test]
+    fn parse_phy0_has_2_vaps() {
+        let state = parse(IW_SAMPLE, UCI_SAMPLE);
+        let phy0 = state.phys.iter().find(|p| p.name == "phy0").unwrap();
+        assert_eq!(phy0.vap_count, 2);
+        assert_eq!(phy0.band, "2.4 GHz");
+        assert_eq!(phy0.channel, "6");
+    }
+
+    #[test]
+    fn parse_phy1_has_1_vap() {
+        let state = parse(IW_SAMPLE, UCI_SAMPLE);
+        let phy1 = state.phys.iter().find(|p| p.name == "phy1").unwrap();
+        assert_eq!(phy1.vap_count, 1);
+        assert_eq!(phy1.band, "5 GHz");
+        assert_eq!(phy1.channel, "36");
+    }
+
+    #[test]
+    fn parse_vap_info_populated() {
+        let state = parse(IW_SAMPLE, UCI_SAMPLE);
+        let (ch, band) = state.vap_info.get("wlan0").unwrap();
+        assert_eq!(ch, "6");
+        assert_eq!(band, "2.4 GHz");
+        assert!(state.vap_info.contains_key("wlan0-1"));
+        assert!(state.vap_info.contains_key("wlan1"));
+    }
+
+    #[test]
+    fn parse_status_ok_when_vap_count_matches_expected() {
+        let state = parse(IW_SAMPLE, UCI_SAMPLE);
+        let phy0 = state.phys.iter().find(|p| p.name == "phy0").unwrap();
+        // radio0 has 2 expected VAPs from UCI, and 2 are up
+        assert_eq!(phy0.expected_vaps, 2);
+        assert!(phy0.status_ok);
+    }
+
+    #[test]
+    fn parse_status_label_down_when_no_vaps() {
+        let iw = "phy#0\n";
+        let state = parse(iw, "");
+        // phy0 has no VAPs — no Interface lines → not parsed at all
+        assert!(state.phys.is_empty(), "empty phy with no interfaces should produce no phys");
+    }
+
+    #[test]
+    fn parse_empty_input() {
+        let state = parse("", "");
+        assert!(state.phys.is_empty());
+        assert!(state.vap_info.is_empty());
+    }
+}

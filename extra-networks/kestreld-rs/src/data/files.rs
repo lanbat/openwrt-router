@@ -198,3 +198,84 @@ pub async fn read_joins() -> HashMap<String, String> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── parse_sh_vars ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn sh_vars_basic_assignment() {
+        let vars = parse_sh_vars("KEY=value\n");
+        assert_eq!(vars.get("KEY").map(|s| s.as_str()), Some("value"));
+    }
+
+    #[test]
+    fn sh_vars_double_quoted() {
+        let vars = parse_sh_vars("KEY=\"hello world\"\n");
+        assert_eq!(vars.get("KEY").map(|s| s.as_str()), Some("hello world"));
+    }
+
+    #[test]
+    fn sh_vars_single_quoted() {
+        let vars = parse_sh_vars("KEY='hello world'\n");
+        assert_eq!(vars.get("KEY").map(|s| s.as_str()), Some("hello world"));
+    }
+
+    #[test]
+    fn sh_vars_skips_comment_lines() {
+        let vars = parse_sh_vars("# KEY=value\n");
+        assert!(vars.is_empty());
+    }
+
+    #[test]
+    fn sh_vars_skips_empty_lines() {
+        let vars = parse_sh_vars("\nKEY=val\n\n");
+        assert_eq!(vars.len(), 1);
+    }
+
+    #[test]
+    fn sh_vars_skips_invalid_key() {
+        // keys with spaces or hyphens are not valid shell identifiers
+        let vars = parse_sh_vars("my-key=value\n");
+        assert!(vars.is_empty());
+    }
+
+    #[test]
+    fn sh_vars_multiple_keys() {
+        let content = "IFACE_NAME=guest\nSUBNET=10.10.0.0/24\nDOT=yes\n";
+        let vars = parse_sh_vars(content);
+        assert_eq!(vars.get("IFACE_NAME").map(|s| s.as_str()), Some("guest"));
+        assert_eq!(vars.get("SUBNET").map(|s| s.as_str()), Some("10.10.0.0/24"));
+        assert_eq!(vars.get("DOT").map(|s| s.as_str()), Some("yes"));
+    }
+
+    #[test]
+    fn sh_vars_value_with_equals_sign() {
+        // Only the first '=' splits; the rest is part of the value
+        let vars = parse_sh_vars("URL=https://example.com/path?a=1\n");
+        assert_eq!(vars.get("URL").map(|s| s.as_str()), Some("https://example.com/path?a=1"));
+    }
+
+    // ── parse_notify_conf (via parse_sh_vars) ──────────────────────────────
+
+    #[test]
+    fn notify_conf_basic() {
+        let content = "\
+IFACE_NAME=guest
+SUBNET=10.10.0.0/24
+DOT=yes
+LAN_ACCESS=no
+SHOW_QR=yes
+BANDWIDTH_THRESHOLD_MB=100
+DEFAULT_DURATION=48h
+JOIN_HISTORY_RETENTION=30d
+";
+        let vars = parse_sh_vars(content);
+        assert_eq!(vars.get("IFACE_NAME").map(|s| s.as_str()), Some("guest"));
+        assert_eq!(vars.get("DOT").map(|s| s.as_str()), Some("yes"));
+        assert_eq!(vars.get("LAN_ACCESS").map(|s| s.as_str()), Some("no"));
+        assert_eq!(vars.get("BANDWIDTH_THRESHOLD_MB").map(|s| s.as_str()), Some("100"));
+    }
+}

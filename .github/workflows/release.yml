@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: ${{ matrix.rust_target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # aarch64 — covers aarch64_cortex-a53, aarch64_cortex-a72, etc.
+          - rust_target: aarch64-unknown-linux-musl
+            arch: aarch64
+            openwrt_arch: aarch64_cortex-a53
+
+          # x86_64 — PC Engines APU, Protectli, VM builds
+          - rust_target: x86_64-unknown-linux-musl
+            arch: x86_64
+            openwrt_arch: x86_64
+
+          # ARMv7 hard-float — covers arm_cortex-a7, arm_cortex-a9, arm_cortex-a15
+          - rust_target: armv7-unknown-linux-musleabihf
+            arch: arm_cortex-a7
+            openwrt_arch: arm_cortex-a7_neon-vfpv4
+
+          # ARMv6 soft-float — older devices (arm_arm1176jzf-s_vfp)
+          - rust_target: arm-unknown-linux-musleabi
+            arch: arm_arm1176jzf-s
+            openwrt_arch: arm_arm1176jzf-s_vfp
+
+          # MIPS little-endian — TP-Link, D-Link, many budget routers
+          - rust_target: mipsel-unknown-linux-musl
+            arch: mipsel
+            openwrt_arch: mipsel_24kc
+
+          # MIPS big-endian — some Atheros-based routers
+          - rust_target: mips-unknown-linux-musl
+            arch: mips
+            openwrt_arch: mips_24kc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build packages
+        run: |
+          make package \
+            CROSS_TARGET=${{ matrix.rust_target }} \
+            ARCH=${{ matrix.arch }} \
+            OPENWRT_ARCH=${{ matrix.openwrt_arch }}
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.arch }}
+          path: target/pkg/*.{apk,ipk}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List packages
+        run: ls -lh artifacts/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

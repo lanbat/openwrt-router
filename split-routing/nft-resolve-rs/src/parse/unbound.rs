@@ -29,3 +29,62 @@ pub fn parse_unbound(content: &str) -> Vec<String> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_zone_basic() {
+        let out = parse_unbound("local-zone: \"example.com\" always_nxdomain\n");
+        assert_eq!(out, ["example.com"]);
+    }
+
+    #[test]
+    fn local_zone_strips_trailing_dot() {
+        let out = parse_unbound("local-zone: \"example.com.\" always_nxdomain\n");
+        assert_eq!(out, ["example.com"]);
+    }
+
+    #[test]
+    fn local_data_a_record() {
+        let out = parse_unbound("local-data: \"example.com A 0.0.0.0\"\n");
+        assert_eq!(out, ["example.com"]);
+    }
+
+    #[test]
+    fn local_data_strips_trailing_dot() {
+        let out = parse_unbound("local-data: \"example.com. A 127.0.0.1\"\n");
+        assert_eq!(out, ["example.com"]);
+    }
+
+    #[test]
+    fn skips_comment_lines() {
+        let out = parse_unbound("# local-zone: \"commented.com\" always_nxdomain\n");
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn skips_unrelated_lines() {
+        let out = parse_unbound("server:\n  verbosity: 1\n  interface: 0.0.0.0\n");
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn real_unbound_snippet() {
+        let input = "\
+# Unbound blocklist
+local-zone: \"doubleclick.net\" always_nxdomain
+local-zone: \"google-analytics.com.\" always_nxdomain
+local-data: \"ads.example.com A 0.0.0.0\"
+local-data: \"tracking.example.com. AAAA ::\"
+";
+        let out = parse_unbound(input);
+        assert_eq!(out, [
+            "doubleclick.net",
+            "google-analytics.com",
+            "ads.example.com",
+            "tracking.example.com",
+        ]);
+    }
+}

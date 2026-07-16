@@ -51,12 +51,10 @@ pub fn parse_auto(content: &str) -> Vec<String> {
 
         // unbound local-zone
         if let Some(rest) = line.strip_prefix("local-zone:") {
-            let rest = rest.trim().trim_matches('"');
-            if let Some(d) = rest.split_whitespace().next() {
-                let d = d.trim_end_matches('.');
-                if d.contains('.') && d.chars().any(|c| c.is_ascii_alphabetic()) {
-                    out.push(d.to_string());
-                }
+            let first = rest.trim().split_whitespace().next().unwrap_or("");
+            let d = first.trim_matches('"').trim_end_matches('.');
+            if d.contains('.') && d.chars().any(|c| c.is_ascii_alphabetic()) {
+                out.push(d.to_string());
             }
             continue;
         }
@@ -65,7 +63,7 @@ pub fn parse_auto(content: &str) -> Vec<String> {
         if let Some(rest) = line.strip_prefix("local-data:") {
             let rest = rest.trim().trim_start_matches('"');
             if let Some(d) = rest.split_whitespace().next() {
-                let d = d.trim_end_matches('.');
+                let d = d.trim_matches('"').trim_end_matches('.');
                 if d.contains('.') && d.chars().any(|c| c.is_ascii_alphabetic()) {
                     out.push(d.to_string());
                 }
@@ -121,4 +119,110 @@ pub fn parse_auto(content: &str) -> Vec<String> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_hosts_format_line() {
+        let out = parse_auto("0.0.0.0 ads.example.com\n");
+        assert_eq!(out, ["ads.example.com"]);
+    }
+
+    #[test]
+    fn auto_hosts_multiple_domains() {
+        let out = parse_auto("0.0.0.0 a.com b.com\n");
+        assert_eq!(out, ["a.com", "b.com"]);
+    }
+
+    #[test]
+    fn auto_lone_ip_kept() {
+        let out = parse_auto("1.2.3.4\n");
+        assert_eq!(out, ["1.2.3.4"]);
+    }
+
+    #[test]
+    fn auto_dnsmasq_address() {
+        let out = parse_auto("address=/example.com/0.0.0.0\n");
+        assert_eq!(out, ["example.com"]);
+    }
+
+    #[test]
+    fn auto_unbound_local_zone() {
+        let out = parse_auto("local-zone: \"blocked.example.com\" always_nxdomain\n");
+        assert_eq!(out, ["blocked.example.com"]);
+    }
+
+    #[test]
+    fn auto_unbound_local_data() {
+        let out = parse_auto("local-data: \"blocked.example.com A 0.0.0.0\"\n");
+        assert_eq!(out, ["blocked.example.com"]);
+    }
+
+    #[test]
+    fn auto_adblock_pipe_pipe() {
+        let out = parse_auto("||doubleclick.net^\n");
+        assert_eq!(out, ["doubleclick.net"]);
+    }
+
+    #[test]
+    fn auto_url_with_scheme() {
+        let out = parse_auto("http://tracker.example.com/announce\n");
+        assert_eq!(out, ["tracker.example.com"]);
+    }
+
+    #[test]
+    fn auto_clash_domain_rule() {
+        let out = parse_auto("DOMAIN,clash.example.com\n");
+        assert_eq!(out, ["clash.example.com"]);
+    }
+
+    #[test]
+    fn auto_ipset_add() {
+        let out = parse_auto("add myset 5.5.5.5\n");
+        assert_eq!(out, ["5.5.5.5"]);
+    }
+
+    #[test]
+    fn auto_bare_domain() {
+        let out = parse_auto("bare.example.com\n");
+        assert_eq!(out, ["bare.example.com"]);
+    }
+
+    #[test]
+    fn auto_skips_hash_comment() {
+        assert!(parse_auto("# comment\n").is_empty());
+    }
+
+    #[test]
+    fn auto_skips_exclamation() {
+        assert!(parse_auto("! adblock comment\n").is_empty());
+    }
+
+    #[test]
+    fn auto_skips_semicolon() {
+        assert!(parse_auto("; semicolon comment\n").is_empty());
+    }
+
+    #[test]
+    fn auto_mixed_real_world_file() {
+        let input = "\
+# Mixed blocklist
+0.0.0.0 doubleclick.net
+||google-analytics.com^
+address=/ads.example.com/0.0.0.0
+udp://tracker.example.org:1337/announce
+DOMAIN,clash-blocked.example.com
+bare-domain.example.com
+";
+        let out = parse_auto(input);
+        assert!(out.contains(&"doubleclick.net".to_string()), "hosts format missed");
+        assert!(out.contains(&"google-analytics.com".to_string()), "adblock format missed");
+        assert!(out.contains(&"ads.example.com".to_string()), "dnsmasq format missed");
+        assert!(out.contains(&"tracker.example.org".to_string()), "url format missed");
+        assert!(out.contains(&"clash-blocked.example.com".to_string()), "clash format missed");
+        assert!(out.contains(&"bare-domain.example.com".to_string()), "bare domain missed");
+    }
 }
