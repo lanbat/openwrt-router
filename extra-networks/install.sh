@@ -567,7 +567,7 @@ cp "${SCRIPT_DIR}/tools/_lib.sh" "${BASE_DIR}/_lib.sh"
 # Password rotation should only happen from an explicit user action.
 ( crontab -l 2>/dev/null | grep -v 'rotate-password' ) | crontab - 2>/dev/null || true
 
-if [ -n "$NOTIFY_URL" ]; then
+if [ -n "$NOTIFY_URL" ] || [ "${JOIN_APPROVAL:-no}" = yes ]; then
     mkdir -p /etc/hotplug.d/dhcp
     cat >/etc/hotplug.d/dhcp/50-extra-networks <<'NOTIFYEOF'
 #!/bin/sh
@@ -606,11 +606,7 @@ for _conf in /etc/extra-networks/*-notify.conf; do
     _join_history_add "$IFACE_NAME" connected "$MACADDR" "$IPADDR" "" \
         "${HOSTNAME:-unknown}" "system" "" "" "" "${JOIN_HISTORY_RETENTION:-90d}"
 
-    [ -n "${NOTIFY_URL:-}" ] || continue
-
-    _device_url="http://${_router_ip}/cgi-bin/device?net=${IFACE_NAME}&mac=${MACADDR}"
-
-    # JOIN_APPROVAL gate — pending devices get an approval request, not a join notification
+    # JOIN_APPROVAL gate — runs before NOTIFY_URL check so pending/approval works without push notifications
     if [ "${JOIN_APPROVAL:-no}" = yes ]; then
         _approved="${BASE_DIR}/${IFACE_NAME}-join-approved"
         _pending="${BASE_DIR}/${IFACE_NAME}-join-pending"
@@ -619,10 +615,12 @@ for _conf in /etc/extra-networks/*-notify.conf; do
             { grep -v "^${MACADDR} " "$_pending" 2>/dev/null
               printf '%s %s\n' "$MACADDR" "$IPADDR"; } >"${_pending}.tmp" \
                 && mv "${_pending}.tmp" "$_pending" || true
-            _approve_url="http://${_router_ip}/cgi-bin/approve-join?net=${IFACE_NAME}&ip=${IPADDR}&mac=${MACADDR}&host=${HOSTNAME:-}"
-            _ntfy "Join request — ${IFACE_NAME}" default wifi \
+            [ -n "${NOTIFY_URL:-}" ] && {
+                _approve_url="http://${_router_ip}/cgi-bin/approve-join?net=${IFACE_NAME}&ip=${IPADDR}&mac=${MACADDR}&host=${HOSTNAME:-}"
+                _ntfy "Join request — ${IFACE_NAME}" default wifi \
 "${HOSTNAME:-unknown} ($MACADDR) joined ${IFACE_NAME} at $IPADDR and needs internet approval." \
-                "view, Approve, ${_approve_url}"
+                    "view, Approve, ${_approve_url}"
+            }
             continue
         fi
         # Approved — update IP mapping so nft set stays current
@@ -632,6 +630,10 @@ for _conf in /etc/extra-networks/*-notify.conf; do
             && mv "${_approved_ips}.tmp" "$_approved_ips" || true
         nft add element inet fw4 ${IFACE_NAME}_join_approved_ips "{ $IPADDR }" 2>/dev/null || true
     fi
+
+    [ -n "${NOTIFY_URL:-}" ] || continue
+
+    _device_url="http://${_router_ip}/cgi-bin/device?net=${IFACE_NAME}&mac=${MACADDR}"
 
     # Two-path join notification: the label is the acknowledgement signal.
     # Unlabelled → notify every join (prompts labelling). Labelled → notify only after long absence.

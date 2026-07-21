@@ -59,8 +59,6 @@ printf '%s' "$MAC" | grep -qiE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' \
     || { printf '<h1>Invalid MAC</h1>'; exit 0; }
 
 _load_notify "$NET"
-[ -n "${NOTIFY_URL:-}" ] \
-    || { printf '<h1>Notifications not configured for %s</h1>' "$(_html "$NET")"; exit 0; }
 _iface="${IFACE_NAME:-$NET}"
 
 # Handle set_label before IP validation — saving a label doesn't require an IP
