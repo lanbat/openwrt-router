@@ -58,10 +58,16 @@ while IFS= read -r line; do
         src_mac=$(awk -v ip="$src" '$1==ip { print $4; exit }' /proc/net/arp 2>/dev/null)
         src_name=$(awk -v ip="$src" '$3==ip { print $4; exit }' /tmp/dhcp.leases 2>/dev/null)
         src_label=$([ -n "$src_name" ] && echo "${src_name} (${src})" || echo "$src")
+        if [ -n "$src_mac" ]; then
+            _view_url="http://${_router_ip}/cgi-bin/device?net=${iface}&mac=${src_mac}"
+        else
+            _view_url="http://${_router_ip}/cgi-bin/network?net=${iface}"
+        fi
         _ntfy "Blocked device — ${iface}" high no_entry \
 "Type: Allowlist rejection
 
-${src_label}${src_mac:+ [${src_mac}]} tried to use the ${iface} network but is not on the allowlist."
+${src_label}${src_mac:+ [${src_mac}]} tried to use the ${iface} network but is not on the allowlist." \
+            "view, View device, ${_view_url}"
         continue
         ;;
     # ── LAN access request ────────────────────────────────────────────────────
