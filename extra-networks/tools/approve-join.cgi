@@ -112,12 +112,10 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ] && [ "$(_get_param "$_params" action)" 
     _label_new=$(printf '%s' "$(_get_param "$_params" label)" \
         | sed 's/+/ /g;s/^[[:space:]]*//;s/[[:space:]]*$//' | head -c 40)
     [ -n "$_label_new" ] || { printf '<h1>Label is required</h1>'; exit 0; }
-    _ip_new=$(_urldecode "$(_get_param "$_params" ip)")
-    _valid_ip "$_ip_new" || { printf '<h1>Invalid IP</h1>'; exit 0; }
-    case "$_ip_new" in "${SUBNET}."*) ;; \
-        *) printf '<h1>IP must be in subnet %s.0/24</h1>' "$(_html "${SUBNET:-?}")"; exit 0 ;; esac
-
     _allowed_macs_f="${BASE_DIR}/${NET}-allowed-macs"
+    _ip_n=$(awk '!/^[[:space:]]*([#]|$)/{split($2,a,"."); n=a[4]+0; if(n>=100&&n<=249&&n>m)m=n} \
+                 END{print (m>0?m+1:100)}' "$_allowed_macs_f" 2>/dev/null)
+    _ip_new="${SUBNET}.${_ip_n:-100}"
     { grep -vi "^${MAC}[[:space:]]" "$_allowed_macs_f" 2>/dev/null
       printf '%s\t%s\t%s\n' "$MAC" "$_ip_new" "$_label_new"; } \
         > "${_allowed_macs_f}.tmp" && mv "${_allowed_macs_f}.tmp" "$_allowed_macs_f" || true

@@ -393,10 +393,6 @@ if [ "${ALLOWLIST:-no}" = yes ] && [ -n "$_wlan" ]; then
             printf '%s\n' "$_smac"
           done > "$_tmp_unk"
     if [ -s "$_tmp_unk" ]; then
-        _next_n=$(awk '!/^[[:space:]]*([#]|$)/{split($2,a,"."); n=a[4]+0; if(n>0&&n>m)m=n}
-                       END{print m>0&&m<249?m+1:100}' \
-                   "$_allowed_macs_f" 2>/dev/null)
-        _next_n="${_next_n:-100}"
         printf '<h2>Requesting access</h2>\n'
         printf '<table><tr><th>MAC</th><th></th></tr>\n'
         while IFS= read -r _smac; do
@@ -407,11 +403,8 @@ if [ "${ALLOWLIST:-no}" = yes ] && [ -n "$_wlan" ]; then
             printf '<input type="hidden" name="action"   value="allowlist_add">'
             printf '<input type="hidden" name="redirect" value="/cgi-bin/network?net=%s">' "$(_html "$_iface")"
             printf '<input type="text" name="label" placeholder="Label" required maxlength="40" style="flex:1">'
-            printf '<input type="text" name="ip" value="%s.%s" maxlength="15" style="width:8rem">' \
-                "$SUBNET" "$_next_n"
             printf '<button class="btn-ok" type="submit">Add</button>'
             printf '</form></td></tr>\n'
-            _next_n=$(( _next_n + 1 ))
         done < "$_tmp_unk"
         printf '</table>\n'
     fi
