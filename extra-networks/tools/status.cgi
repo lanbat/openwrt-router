@@ -596,62 +596,6 @@ for _conf in "${BASE_DIR}"/*-notify.conf; do
         fi
     fi
 
-    # ── Pending LAN access requests ───────────────────────────────────────────
-    # Show attempts from this network TO the LAN with no active allow rule.
-    # The 2LAN monitor is installed when LAN_ACCESS≠yes.
-
-    _2lan_lines=$(printf '%s\n' "$_logdata" | grep "EXTNET-2LAN-${_iface}:")
-    if [ -n "$_2lan_lines" ]; then
-        _tmp_pending="/tmp/status_cgi_pending_${_iface}"
-        rm -f "$_tmp_pending"
-
-        printf '%s\n' "$_2lan_lines" \
-            | awk '{
-                src=""; dst=""; port=""; proto=""
-                for(i=1;i<=NF;i++){
-                    if($i~/^SRC=/) { sub(/SRC=/,"",$i); src=$i }
-                    if($i~/^DST=/) { sub(/DST=/,"",$i); dst=$i }
-                    if($i~/^PROTO=/) { sub(/PROTO=/,"",$i); proto=tolower($i) }
-                    if($i~/^DPT=/) { sub(/DPT=/,"",$i); port=$i }
-                }
-                if(src && dst && port && proto)
-                    printf "%s\t%s\t%s\t%s\t%s\n", $4, src, dst, port, proto
-            }' \
-            | sort -t "$(printf '\t')" -u -k3,5 \
-            | tail -10 \
-            | while IFS=$(printf '\t') read -r _ts _src _dst _port _proto; do
-                [ -z "$_dst" ] && continue
-                _dst_slug=$(printf '%s' "$_dst" | sed 's/[.:]/\_/g')
-                _rule_key="allow_${_iface}_lan_${_dst_slug}_${_port}_${_proto}"
-                uci -q get firewall."$_rule_key" >/dev/null 2>&1 && continue
-                _src_name=$(_name_for_ip "$_src")
-                _dst_name=$(_name_for_ip "$_dst")
-                printf '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s/%s</td><td>' \
-                    "$_ts" \
-                    "$(_html "${_src_name:-$_src}")" \
-                    "$(_html "${_dst_name:-$_dst}")" \
-                    "$_port" "$_proto"
-                printf '<form method="POST" action="/cgi-bin/approve-access">'
-                printf '<input type="hidden" name="net" value="%s">'        "$(_html "$_iface")"
-                printf '<input type="hidden" name="src" value="%s">'        "$_src"
-                printf '<input type="hidden" name="dst" value="%s">'        "$_dst"
-                printf '<input type="hidden" name="proto" value="%s">'      "$_proto"
-                printf '<input type="hidden" name="port" value="%s">'       "$_port"
-                printf '<input type="hidden" name="dest_zone" value="lan">'
-                printf '<input type="hidden" name="duration" value="%s">'   "${DEFAULT_DURATION:-24h}"
-                printf '<button type="submit">Grant</button>'
-                printf '</form></td></tr>\n'
-            done >> "$_tmp_pending" 2>/dev/null
-
-        if [ -s "$_tmp_pending" ]; then
-            printf '<h2 style="margin-top:1.25rem">Pending — %s</h2>' "$(_html "$_iface")"
-            printf '<table><tr><th>Time</th><th>From (guest)</th><th>To (LAN)</th><th>Port/Proto</th><th></th></tr>\n'
-            cat "$_tmp_pending"
-            printf '</table>\n'
-        fi
-        rm -f "$_tmp_pending"
-    fi
-
     # ── Active LAN access rules ───────────────────────────────────────────────
 
     _rules=""

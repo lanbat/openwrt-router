@@ -294,6 +294,24 @@ ${_actor_info}"
         exit 0
         ;;
 
+    allow_lan)
+        _dip=$(_get_param "$_params" dst_ip)
+        _dpt=$(_get_param "$_params" dst_port)
+        _dpr=$(_get_param "$_params" dst_proto)
+        _dur=$(_get_param "$_params" duration)
+        _valid_ip "$_dip" || { printf '<h1>Invalid IP</h1>'; exit 0; }
+        printf '%s' "$_dpt" | grep -qE '^[0-9]{1,5}$' \
+            || { printf '<h1>Invalid port</h1>'; exit 0; }
+        printf '%s' "$_dpr" | grep -qE '^(tcp|udp)$' \
+            || { printf '<h1>Invalid proto</h1>'; exit 0; }
+        case "${_dur:-}" in 1h|6h|12h|24h|2d|7d|30d) ;; *) _dur="${DEFAULT_DURATION:-24h}" ;; esac
+        _allow_script=$(awk -F= '/^REPO_DIR/{print $2;exit}' "${BASE_DIR}/config" 2>/dev/null)
+        sh "${_allow_script}/tools/allow-service.sh" \
+            "$_iface" "$_dip" "$_dpr" "$_dpt" "$_dur" lan >/dev/null 2>&1 || true
+        printf '<meta http-equiv="refresh" content="0;url=%s">' "$(_html "$_BACK_URL")"
+        exit 0
+        ;;
+
     revoke_rule)
         _dst=$(_get_param "$_params" dst)
         _port=$(_get_param "$_params" port)
@@ -404,6 +422,44 @@ fi
 
 _is_approved=no
 grep -qF "$MAC" "${BASE_DIR}/${_iface}-join-approved" 2>/dev/null && _is_approved=yes
+
+# Scrape 2LAN blocked attempts for this device
+_lan_rows=""
+if [ -n "$_DEV_IP" ]; then
+    _lan_rows=$(logread 2>/dev/null \
+        | awk -v ip="$_DEV_IP" -v iface="$_iface" \
+            'index($0, "EXTNET-2LAN-" iface ":") {
+                src=""; dst=""; dpt=""; proto=""
+                for(i=1;i<=NF;i++){
+                    if($i~/^SRC=/) { sub(/^SRC=/,"",$i); src=$i }
+                    if($i~/^DST=/) { sub(/^DST=/,"",$i); dst=$i }
+                    if($i~/^DPT=/) { sub(/^DPT=/,"",$i); dpt=$i }
+                    if($i~/^PROTO=/) { sub(/^PROTO=/,"",$i); proto=tolower($i) }
+                }
+                if(src==ip && dst && dpt && proto) print dst"\t"dpt"\t"proto"\t"$4
+            }' \
+        | sort -t "$(printf '\t')" -u -k1,3 \
+        | tail -20 \
+        | while IFS=$(printf '\t') read -r _dst _dpt _proto _ts; do
+            _dst_slug=$(printf '%s' "$_dst" | sed 's/[.:]/\_/g')
+            uci -q get firewall."allow_${_iface}_lan_${_dst_slug}_${_dpt}_${_proto}" \
+                >/dev/null 2>&1 && continue
+            _rdns=$(nslookup "$_dst" 2>/dev/null \
+                | awk '/name =/{gsub(/\.$/,"",$NF); print $NF; exit}')
+            printf '<tr><td>%s</td><td>%s</td><td>%s</td><td class="dim">%s</td><td>' \
+                "$(_html "$_dst")" "$_dpt" "$_proto" "$(_html "${_rdns:----}")"
+            printf '<form method="POST" action="/cgi-bin/device">'
+            printf '<input type="hidden" name="net"       value="%s">' "$(_html "$NET")"
+            printf '<input type="hidden" name="mac"       value="%s">' "$(_html "$MAC")"
+            printf '<input type="hidden" name="action"    value="allow_lan">'
+            printf '<input type="hidden" name="dst_ip"    value="%s">' "$(_html "$_dst")"
+            printf '<input type="hidden" name="dst_port"  value="%s">' "$(_html "$_dpt")"
+            printf '<input type="hidden" name="dst_proto" value="%s">' "$(_html "$_proto")"
+            printf '<input type="hidden" name="duration"  value="%s">' "${DEFAULT_DURATION:-24h}"
+            printf '<button type="submit">Allow</button></form>'
+            printf '</td></tr>\n'
+          done)
+fi
 
 # Build pending rows
 _pending_rows=$([ -f "$_pending_f" ] && \
@@ -703,6 +759,18 @@ ${_approval_row}
 </div>
 </form>
 
+<h2>LAN access attempts</h2>
+HTML
+
+if [ -n "$_lan_rows" ]; then
+    printf '<table><tr><th>Destination</th><th>Port</th><th>Proto</th><th>Hostname</th><th></th></tr>\n'
+    printf '%s\n' "$_lan_rows"
+    printf '</table>\n'
+else
+    printf '<p class="dim">No blocked LAN attempts.</p>\n'
+fi
+
+cat <<HTML
 <h2>Pending connections</h2>
 HTML
 
