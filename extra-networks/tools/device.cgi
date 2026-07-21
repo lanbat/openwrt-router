@@ -423,10 +423,11 @@ fi
 _is_approved=no
 grep -qF "$MAC" "${BASE_DIR}/${_iface}-join-approved" 2>/dev/null && _is_approved=yes
 
-# Scrape 2LAN blocked attempts for this device
+# Scrape 2LAN blocked attempts for this device; filter already-allowed, then group by dst
 _lan_rows=""
 if [ -n "$_DEV_IP" ]; then
-    _lan_rows=$(logread 2>/dev/null \
+    _lan_tmp="/tmp/devcgi_lan_$$"
+    logread 2>/dev/null \
         | awk -v ip="$_DEV_IP" -v iface="$_iface" \
             'index($0, "EXTNET-2LAN-" iface ":") {
                 src=""; dst=""; dpt=""; proto=""
@@ -436,59 +437,82 @@ if [ -n "$_DEV_IP" ]; then
                     if($i~/^DPT=/) { sub(/^DPT=/,"",$i); dpt=$i }
                     if($i~/^PROTO=/) { sub(/^PROTO=/,"",$i); proto=tolower($i) }
                 }
-                if(src==ip && dst && dpt && proto) print dst"\t"dpt"\t"proto"\t"$4
+                if(src==ip && dst && dpt && proto) print dst"\t"dpt"\t"proto
             }' \
         | sort -t "$(printf '\t')" -u -k1,3 \
         | tail -20 \
-        | while IFS=$(printf '\t') read -r _dst _dpt _proto _ts; do
+        | while IFS=$(printf '\t') read -r _dst _dpt _proto; do
             _dst_slug=$(printf '%s' "$_dst" | sed 's/[.:]/\_/g')
             uci -q get firewall."allow_${_iface}_lan_${_dst_slug}_${_dpt}_${_proto}" \
                 >/dev/null 2>&1 && continue
-            _rdns=$(nslookup "$_dst" 2>/dev/null \
-                | awk '/name =/{gsub(/\.$/,"",$NF); print $NF; exit}')
-            printf '<tr><td>%s</td><td>%s</td><td>%s</td><td class="dim">%s</td><td>' \
-                "$(_html "$_dst")" "$_dpt" "$_proto" "$(_html "${_rdns:----}")"
-            printf '<form method="POST" action="/cgi-bin/device">'
+            printf '%s\t%s\t%s\n' "$_dst" "$_dpt" "$_proto"
+          done > "$_lan_tmp" 2>/dev/null || true
+    if [ -s "$_lan_tmp" ]; then
+        _lan_rows=$(sort -t "$(printf '\t')" -k1,1 "$_lan_tmp" \
+            | while IFS=$(printf '\t') read -r _dst _dpt _proto; do
+                if [ "$_dst" != "${_prev_lan_dst:-}" ]; then
+                    _rdns=$(nslookup "$_dst" 2>/dev/null \
+                        | awk '/name =/{gsub(/\.$/,"",$NF); print $NF; exit}')
+                    printf '<tr class="host-hdr"><td colspan="2"><strong>%s</strong>' \
+                        "$(_html "$_dst")"
+                    [ -n "$_rdns" ] && \
+                        printf ' <span class="dim">— %s</span>' "$(_html "$_rdns")"
+                    printf '</td></tr>\n'
+                    _prev_lan_dst="$_dst"
+                fi
+                printf '<tr><td class="dim">%s/%s</td><td>' "$_dpt" "$_proto"
+                printf '<form method="POST" action="/cgi-bin/device">'
+                printf '<input type="hidden" name="net"       value="%s">' "$(_html "$NET")"
+                printf '<input type="hidden" name="mac"       value="%s">' "$(_html "$MAC")"
+                printf '<input type="hidden" name="action"    value="allow_lan">'
+                printf '<input type="hidden" name="dst_ip"    value="%s">' "$(_html "$_dst")"
+                printf '<input type="hidden" name="dst_port"  value="%s">' "$(_html "$_dpt")"
+                printf '<input type="hidden" name="dst_proto" value="%s">' "$(_html "$_proto")"
+                printf '<input type="hidden" name="duration"  value="%s">' "${DEFAULT_DURATION:-24h}"
+                printf '<button type="submit">Allow</button></form>'
+                printf '</td></tr>\n'
+              done)
+    fi
+    rm -f "$_lan_tmp"
+fi
+
+# Build pending rows, grouped by destination host
+_pending_rows=""
+if [ -f "$_pending_f" ]; then
+    _pending_rows=$(sort -t "$(printf '\t')" -k1,1 "$_pending_f" \
+        | while IFS=$(printf '\t') read -r _dst _dpt _proto _ts; do
+            [ -z "$_dst" ] && continue
+            grep -qF "${MAC}	${_dst}	" "$_rules_f" 2>/dev/null && continue
+            if [ "$_dst" != "${_prev_pend_dst:-}" ]; then
+                _rdns=$(nslookup "$_dst" 2>/dev/null \
+                    | awk '/name =/{gsub(/\.$/,"",$NF); print $NF; exit}')
+                printf '<tr class="host-hdr"><td colspan="2"><strong>%s</strong>' \
+                    "$(_html "$_dst")"
+                [ -n "$_rdns" ] && \
+                    printf ' <span class="dim">— %s</span>' "$(_html "$_rdns")"
+                printf '</td></tr>\n'
+                _prev_pend_dst="$_dst"
+            fi
+            printf '<tr><td class="dim">%s/%s</td><td>' "$_dpt" "$_proto"
+            printf '<form method="POST" action="/cgi-bin/device" style="display:inline">'
             printf '<input type="hidden" name="net"       value="%s">' "$(_html "$NET")"
             printf '<input type="hidden" name="mac"       value="%s">' "$(_html "$MAC")"
-            printf '<input type="hidden" name="action"    value="allow_lan">'
+            printf '<input type="hidden" name="action"    value="approve_pending">'
             printf '<input type="hidden" name="dst_ip"    value="%s">' "$(_html "$_dst")"
             printf '<input type="hidden" name="dst_port"  value="%s">' "$(_html "$_dpt")"
             printf '<input type="hidden" name="dst_proto" value="%s">' "$(_html "$_proto")"
-            printf '<input type="hidden" name="duration"  value="%s">' "${DEFAULT_DURATION:-24h}"
-            printf '<button type="submit">Allow</button></form>'
+            printf '<button type="submit">Allow</button></form> '
+            printf '<form method="POST" action="/cgi-bin/device" style="display:inline">'
+            printf '<input type="hidden" name="net"       value="%s">' "$(_html "$NET")"
+            printf '<input type="hidden" name="mac"       value="%s">' "$(_html "$MAC")"
+            printf '<input type="hidden" name="action"    value="deny_pending">'
+            printf '<input type="hidden" name="dst_ip"    value="%s">' "$(_html "$_dst")"
+            printf '<input type="hidden" name="dst_port"  value="%s">' "$(_html "$_dpt")"
+            printf '<input type="hidden" name="dst_proto" value="%s">' "$(_html "$_proto")"
+            printf '<button class="btn-danger" type="submit">Deny</button></form>'
             printf '</td></tr>\n'
-          done)
+          done 2>/dev/null || true)
 fi
-
-# Build pending rows
-_pending_rows=$([ -f "$_pending_f" ] && \
-    while IFS=$(printf '\t') read -r _dst _dpt _proto _ts; do
-        [ -z "$_dst" ] && continue
-        grep -qF "${MAC}	${_dst}	" "$_rules_f" 2>/dev/null && continue
-        _rdns=$(nslookup "$_dst" 2>/dev/null \
-            | awk '/name =/{gsub(/\.$/,"",$NF); print $NF; exit}')
-        printf '<tr><td>%s</td><td>%s</td><td>%s</td><td class="dim">%s</td><td>' \
-            "$(_html "$_dst")" "$_dpt" "$_proto" "$(_html "${_rdns:----}")"
-        printf '<form method="POST" action="/cgi-bin/device">'
-        printf '<input type="hidden" name="net"       value="%s">' "$(_html "$NET")"
-        printf '<input type="hidden" name="mac"       value="%s">' "$(_html "$MAC")"
-        printf '<input type="hidden" name="action"    value="approve_pending">'
-        printf '<input type="hidden" name="dst_ip"    value="%s">' "$(_html "$_dst")"
-        printf '<input type="hidden" name="dst_port"  value="%s">' "$(_html "$_dpt")"
-        printf '<input type="hidden" name="dst_proto" value="%s">' "$(_html "$_proto")"
-        printf '<button type="submit">Allow</button></form> '
-        printf '<form method="POST" action="/cgi-bin/device">'
-        printf '<input type="hidden" name="net"       value="%s">' "$(_html "$NET")"
-        printf '<input type="hidden" name="mac"       value="%s">' "$(_html "$MAC")"
-        printf '<input type="hidden" name="action"    value="deny_pending">'
-        printf '<input type="hidden" name="dst_ip"    value="%s">' "$(_html "$_dst")"
-        printf '<input type="hidden" name="dst_port"  value="%s">' "$(_html "$_dpt")"
-        printf '<input type="hidden" name="dst_proto" value="%s">' "$(_html "$_proto")"
-        printf '<button class="btn-danger" type="submit">Deny</button></form>'
-        printf '</td></tr>\n'
-    done < "$_pending_f" 2>/dev/null \
-|| true)
 
 # Build rules rows
 _rules_rows=$([ -f "$_rules_f" ] && \
@@ -694,6 +718,8 @@ table{width:100%;border-collapse:collapse;font-size:.875rem;margin:.4rem 0}
 th{text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;
    color:#888;padding:.35rem .5rem;border-bottom:1px solid #e0e0e0}
 td{padding:.35rem .5rem;border-bottom:1px solid #f0f0f0;vertical-align:top}
+.host-hdr td{background:#f5f5f5;font-weight:600;border-bottom:1px solid #e0e0e0;border-top:1px solid #e8e8e8}
+.net-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:#888;margin:1.1rem 0 .2rem}
 a{color:#1976d2;text-decoration:none}
 form{display:inline}
 button{font-size:.75rem;padding:.15rem .45rem;cursor:pointer;background:#1976d2;
@@ -759,23 +785,21 @@ ${_approval_row}
 </div>
 </form>
 
-<h2>LAN access attempts</h2>
+<h2>Connection approvals</h2>
+<p class="net-label">LAN</p>
 HTML
 
 if [ -n "$_lan_rows" ]; then
-    printf '<table><tr><th>Destination</th><th>Port</th><th>Proto</th><th>Hostname</th><th></th></tr>\n'
+    printf '<table><tr><th>Port/Proto</th><th></th></tr>\n'
     printf '%s\n' "$_lan_rows"
     printf '</table>\n'
 else
     printf '<p class="dim">No blocked LAN attempts.</p>\n'
 fi
 
-cat <<HTML
-<h2>Pending connections</h2>
-HTML
-
+printf '<p class="net-label">Internet</p>\n'
 if [ -n "$_pending_rows" ]; then
-    printf '<table><tr><th>Destination</th><th>Port</th><th>Proto</th><th>Hostname</th><th></th></tr>\n'
+    printf '<table><tr><th>Port/Proto</th><th></th></tr>\n'
     printf '%s\n' "$_pending_rows"
     printf '</table>\n'
 else
