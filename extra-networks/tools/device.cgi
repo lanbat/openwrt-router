@@ -642,7 +642,7 @@ HTML
     else
         _allowlist_row=$(cat <<HTML
 <div class="row"><span class="lbl">Allowlist</span><span class="val warn">Not on allowlist</span></div>
-<div class="row"><span class="lbl">Actions</span><span class="val actions"><form method="POST" action="/cgi-bin/approve-join"><input type="hidden" name="net" value="$(_html "$NET")"><input type="hidden" name="mac" value="$(_html "$MAC")"><input type="hidden" name="action" value="allowlist_add"><input type="hidden" name="redirect" value="$(_html "$_BACK_URL")"><input type="text" name="label" value="$(_html "$_DEV_LABEL")" placeholder="Label" maxlength="40" style="width:140px"><button class="btn-ok" type="submit">Add to allowlist</button></form></span></div>
+<div class="row"><span class="lbl">Actions</span><span class="val actions"><form method="POST" action="/cgi-bin/approve-join"><input type="hidden" name="net" value="$(_html "$NET")"><input type="hidden" name="mac" value="$(_html "$MAC")"><input type="hidden" name="action" value="allowlist_add"><input type="hidden" name="redirect" value="$(_html "$_BACK_URL")"><input type="hidden" name="label" value="$(_html "$_DEV_LABEL")"><button class="btn-ok" type="submit">Add to allowlist</button></form></span></div>
 HTML
 )
     fi
