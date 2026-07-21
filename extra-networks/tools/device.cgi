@@ -797,6 +797,7 @@ button{font-size:.75rem;padding:.15rem .45rem;cursor:pointer;background:#1976d2;
 .btn-ok{background:#2e7d32}
 .btn-deny{background:#c62828}
 .btn-danger{background:#c62828}
+button:disabled{opacity:.4;cursor:not-allowed}
 input[type=text],input[type=number]{font-size:.875rem;padding:.3rem .5rem;
    border:1px solid #ccc;border-radius:4px}
 .irow{display:flex;gap:.5rem;align-items:center;margin:.4rem 0}

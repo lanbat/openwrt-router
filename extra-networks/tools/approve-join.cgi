@@ -115,7 +115,9 @@ if [ "${REQUEST_METHOD:-GET}" = "POST" ] && [ "$(_get_param "$_params" action)" 
         || { printf '<h1>Network %s does not use an allowlist</h1>' "$(_html "$NET")"; exit 0; }
     _label_new=$(printf '%s' "$(_get_param "$_params" label)" \
         | sed 's/+/ /g;s/^[[:space:]]*//;s/[[:space:]]*$//' | head -c 40)
-    [ -n "$_label_new" ] || { printf '<h1>Label is required</h1>'; exit 0; }
+    _redirect=$(_urldecode "$(_get_param "$_params" redirect)")
+    case "$_redirect" in /cgi-bin/*) ;; *) _redirect="/cgi-bin/status" ;; esac
+    [ -n "$_label_new" ] || { printf '<meta http-equiv="refresh" content="0;url=%s">' "$(_html "$_redirect")"; exit 0; }
     _allowed_macs_f="${BASE_DIR}/${NET}-allowed-macs"
     # Prefer the device's current DHCP IP (avoids needing a re-lease); fall back to next free
     _cur_ip=$(awk -v m="$MAC" 'tolower($2)==tolower(m){print $3; exit}' /tmp/dhcp.leases 2>/dev/null)
@@ -158,8 +160,6 @@ Label: ${_label_new}
 IP: ${_ip_new}" \
     "view, Device, ${_DEV_URL}"
 
-    _redirect=$(_urldecode "$(_get_param "$_params" redirect)")
-    case "$_redirect" in /cgi-bin/*) ;; *) _redirect="/cgi-bin/status" ;; esac
     printf '<meta http-equiv="refresh" content="0;url=%s">' "$(_html "$_redirect")"
     exit 0
 fi
