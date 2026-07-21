@@ -365,6 +365,12 @@ else
     rm -f /etc/dnsmasq.d/${IFACE}-macfilter.conf
 fi
 
+# Write a persistent dhcp-range conf so dnsmasq serves DHCP on this interface
+# even when the bridge comes up after dnsmasq has already started (OpenWrt
+# generates the main UCI conf at boot before isolated bridges are available).
+printf 'dhcp-range=set:%s,%s.100,%s.249,255.255.255.0,12h\n' \
+    "${IFACE}" "${SUBNET}" "${SUBNET}" > "/etc/dnsmasq.d/${IFACE}-dhcp-range.conf"
+
 # ── port restriction ──────────────────────────────────────────────────────────
 
 rm -f /etc/nftables.d/22-${IFACE}-ports.nft
